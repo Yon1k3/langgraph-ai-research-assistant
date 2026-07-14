@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         default="http://localhost:11434",
         pattern=r"^https?://",
     )
+    web_search_api_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
