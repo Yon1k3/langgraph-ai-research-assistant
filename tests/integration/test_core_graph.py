@@ -82,7 +82,7 @@ def test_core_graph_routes_to_expected_non_research_node(
                     "content": "Test request",
                 }
             ],
-            "sources": [previous_source],
+            "sources": [previous_source.to_record()],
         }
     )
 
@@ -131,4 +131,4 @@ def test_core_graph_runs_research_agent_and_returns_sources() -> None:
 
     assert result["route"] == "research"
     assert result["messages"][-1].content == "Research answer"
-    assert result["sources"] == [source]
+    assert result["sources"] == [source.to_record()]

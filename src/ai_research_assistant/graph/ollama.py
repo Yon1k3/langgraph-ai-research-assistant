@@ -50,8 +50,12 @@ Important boundaries:
 
 - A request must not be routed to direct_answer merely because it is simple.
 - Any substantive non-technical task must be routed to unsupported.
+- A technical request that only says "help me" without describing the concrete
+  problem, goal, technology, or failure must be routed to clarification.
 - "Привіт!" is direct_answer.
 - "Що таке Python?" is direct_answer.
+- "Допоможи мені з агентом." is clarification. Ask what kind of agent the user
+  is building and what specific help is needed.
 - "Склади план харчування на тиждень." is unsupported.
 - "Напиши FastAPI endpoint." is code.
 - "Порівняй LangGraph і CrewAI." is comparison.

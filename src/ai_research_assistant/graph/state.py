@@ -1,6 +1,6 @@
 from langgraph.graph import MessagesState
 
-from ai_research_assistant.models import RouteName, SourceItem
+from ai_research_assistant.models import RouteName, SourceRecord
 
 
 class AppState(MessagesState, total=False):
@@ -11,4 +11,4 @@ class AppState(MessagesState, total=False):
     routing_confidence: float
     response_language: str
     clarification_question: str | None
-    sources: list[SourceItem]
+    sources: list[SourceRecord]

@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from ai_research_assistant.graph import build_app_graph
 from ai_research_assistant.models import RouteName
 
@@ -17,7 +19,7 @@ def main() -> None:
     print("Building the live application graph...")
     graph = build_app_graph()
 
-    for query, expected_route in TEST_CASES:
+    for index, (query, expected_route) in enumerate(TEST_CASES, start=1):
         print(f"\nQuery: {query}")
 
         result = graph.invoke(
@@ -28,7 +30,12 @@ def main() -> None:
                         "content": query,
                     }
                 ]
-            }
+            },
+            config={
+                "configurable": {
+                    "thread_id": f"router-smoke-{index}-{uuid4()}",
+                }
+            },
         )
 
         actual_route = result["route"]
@@ -48,14 +55,16 @@ def main() -> None:
             print("Verified sources:")
 
             for index, source in enumerate(sources, start=1):
-                print(f"[{index}] {source.title}")
-                print(f"    Type: {source.source_type}")
-                print(f"    URL:  {source.url}")
+                print(f"[{index}] {source['title']}")
+                print(f"    Type: {source['source_type']}")
+                print(f"    URL:  {source['url']}")
 
             if not sources:
                 raise RuntimeError("Research route returned no verified sources")
 
-            if not any("langgraph" in f"{source.title} {source.url}".lower() for source in sources):
+            if not any(
+                "langgraph" in f"{source['title']} {source['url']}".lower() for source in sources
+            ):
                 raise RuntimeError("Research route returned no LangGraph-related sources")
         elif sources:
             raise RuntimeError(f"Route {expected_route} returned unexpected sources")

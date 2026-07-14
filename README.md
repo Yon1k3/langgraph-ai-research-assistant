@@ -7,7 +7,15 @@ Python libraries, APIs, GitHub projects, and software architecture decisions.
 
 The project is under active development.
 
-Current milestone: repository and Python environment setup.
+Current milestone: checkpointed conversations and Human-in-the-Loop clarification.
+
+Implemented so far:
+
+- local Ollama chat, structured output, and tool calling;
+- LangGraph request router with direct, unsupported, and research paths;
+- Tavily-backed Research Agent with verified source metadata;
+- SQLite short-term conversation persistence by `thread_id`;
+- clarification pause and resume through LangGraph interrupts.
 
 ## Planned capabilities
 
@@ -44,10 +52,10 @@ Current milestone: repository and Python environment setup.
 
 - [x] Create and publish the repository
 - [x] Verify Python, Git, and Ollama
-- [ ] Configure and test the Ollama integration
-- [ ] Implement the core LangGraph router
-- [ ] Add specialized agents
-- [ ] Add persistence and Human-in-the-Loop
+- [x] Configure and test the Ollama integration
+- [x] Implement the core LangGraph router
+- [ ] Add all specialized agents (Research Agent is complete)
+- [x] Add persistence and Human-in-the-Loop clarification
 - [ ] Build the Streamlit interface
 - [ ] Add observability and CI
 
@@ -57,3 +65,6 @@ Secrets must be stored in a local `.env` file and must never be committed.
 
 Local databases, logs, virtual environments, caches, and generated runtime data are
 excluded from version control.
+
+The local checkpoint database path is configured through `CHECKPOINT_DB_PATH` and
+defaults to `data/checkpoints.sqlite3`.
