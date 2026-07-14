@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Literal, TypeAlias
 
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from ai_research_assistant.graph.state import AppState
 from ai_research_assistant.models import (
@@ -14,6 +14,7 @@ CoreNodeName: TypeAlias = Literal[
     "direct_answer",
     "unsupported",
     "research",
+    "clarification",
     "route_unavailable",
 ]
 ResponseKind: TypeAlias = Literal[
@@ -54,6 +55,9 @@ def resolve_destination(route: RouteName) -> CoreNodeName:
 
     if route == "research":
         return "research"
+
+    if route == "clarification":
+        return "clarification"
 
     return "route_unavailable"
 
@@ -127,7 +131,60 @@ def create_research_node(
                     "content": result.answer,
                 }
             ],
-            "sources": result.sources,
+            "sources": [source.to_record() for source in result.sources],
         }
 
     return research_node
+
+
+def create_clarification_node() -> Callable[[AppState], Command[Literal["router"]]]:
+    """Create a node that pauses for clarification and returns to the router."""
+
+    def clarification_node(state: AppState) -> Command[Literal["router"]]:
+        question = state.get("clarification_question")
+
+        if not question:
+            raise ValueError("Clarification node requires a question")
+
+        prompt = {
+            "type": "clarification",
+            "question": question,
+        }
+
+        while True:
+            answer = interrupt(prompt)
+
+            if isinstance(answer, str) and answer.strip():
+                normalized_answer = answer.strip()
+                break
+
+            prompt = {
+                "type": "clarification",
+                "question": question,
+                "error": (
+                    "Будь ласка, надай непорожню текстову відповідь."
+                    if state.get("response_language") == "uk"
+                    else "Please provide a non-empty text answer."
+                ),
+            }
+
+        original_query = get_latest_user_text(state)
+        clarified_query = (
+            f"Original request:\n{original_query}\n\nUser clarification:\n{normalized_answer}"
+        )
+
+        return Command(
+            goto="router",
+            update={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": clarified_query,
+                    }
+                ],
+                "clarification_question": None,
+                "sources": [],
+            },
+        )
+
+    return clarification_node

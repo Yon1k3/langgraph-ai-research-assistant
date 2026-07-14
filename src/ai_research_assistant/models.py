@@ -1,4 +1,4 @@
-from typing import Literal, Self, TypeAlias
+from typing import Literal, Self, TypeAlias, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -18,6 +18,14 @@ SourceType: TypeAlias = Literal[
 ]
 
 
+class SourceRecord(TypedDict):
+    """JSON-serializable source metadata stored in graph state."""
+
+    title: str
+    url: str
+    source_type: SourceType
+
+
 class SourceItem(BaseModel):
     """Normalized source metadata shown with a final response."""
 
@@ -26,6 +34,15 @@ class SourceItem(BaseModel):
     source_type: SourceType
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    def to_record(self) -> SourceRecord:
+        """Convert validated source metadata to checkpoint-safe primitives."""
+
+        return {
+            "title": self.title,
+            "url": str(self.url),
+            "source_type": self.source_type,
+        }
 
 
 class SearchResultItem(BaseModel):

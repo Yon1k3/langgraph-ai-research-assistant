@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
         pattern=r"^https?://",
     )
     web_search_api_key: SecretStr | None = None
+    checkpoint_db_path: Path = Path("data/checkpoints.sqlite3")
 
     model_config = SettingsConfigDict(
         env_file=".env",
