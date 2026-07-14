@@ -10,7 +10,12 @@ from ai_research_assistant.graph.nodes import (
     create_response_node,
     create_router_node,
 )
+from ai_research_assistant.graph.ollama import (
+    create_ollama_response_generator,
+    create_ollama_route_classifier,
+)
 from ai_research_assistant.graph.state import AppState
+from ai_research_assistant.llm import create_chat_model
 
 CoreGraph: TypeAlias = CompiledStateGraph[
     AppState,
@@ -59,3 +64,14 @@ def build_core_graph(
     builder.add_edge("route_unavailable", END)
 
     return builder.compile()
+
+
+def build_app_graph() -> CoreGraph:
+    """Build the application graph with the configured Ollama model."""
+
+    model = create_chat_model()
+
+    return build_core_graph(
+        classify=create_ollama_route_classifier(model),
+        generate=create_ollama_response_generator(model),
+    )
