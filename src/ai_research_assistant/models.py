@@ -38,6 +38,15 @@ class SearchResultItem(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+class ResearchResult(BaseModel):
+    """Final answer and real sources collected by the research agent."""
+
+    answer: str = Field(min_length=1)
+    sources: list[SourceItem]
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
 class RouteDecision(BaseModel):
     """Structured routing decision produced by the router."""
 
