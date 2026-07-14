@@ -1,6 +1,6 @@
 from typing import Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 RouteName: TypeAlias = Literal[
     "research",
@@ -10,6 +10,32 @@ RouteName: TypeAlias = Literal[
     "clarification",
     "unsupported",
 ]
+SourceType: TypeAlias = Literal[
+    "documentation",
+    "github",
+    "web",
+    "release_notes",
+]
+
+
+class SourceItem(BaseModel):
+    """Normalized source metadata shown with a final response."""
+
+    title: str = Field(min_length=1, max_length=500)
+    url: HttpUrl
+    source_type: SourceType
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class SearchResultItem(BaseModel):
+    """Normalized search result used by the research workflow."""
+
+    source: SourceItem
+    content: str = Field(min_length=1, max_length=5000)
+    score: float = Field(ge=0.0, le=1.0)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class RouteDecision(BaseModel):

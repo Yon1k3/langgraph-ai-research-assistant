@@ -9,6 +9,7 @@ description = "A local multi-agent AI research assistant built with LangGraph an
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
 dependencies = [
+    "httpx==0.28.1",
     "langchain-core==1.4.9",
     "langchain-ollama==1.1.0",
     "langgraph==1.2.9",
