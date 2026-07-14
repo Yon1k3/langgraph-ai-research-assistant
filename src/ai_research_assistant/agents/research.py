@@ -47,7 +47,15 @@ Rules:
 """.strip()
 
 OFFICIAL_SOURCE_HINT = "official documentation official GitHub repository changelog release notes"
+TECHNICAL_TERM_PATTERN = re.compile(r"(?<!\w)[A-Za-z][A-Za-z0-9_.+#-]{1,}(?!\w)")
 URL_PATTERN = re.compile(r"https?://[^\s<>]+")
+URL_LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+SOURCE_HEADING_PATTERN = re.compile(
+    r"^\s*(?:#{1,6}\s*)?"
+    r"(?:(?:official|verified)\s+sources|sources|"
+    r"(?:офіційні|перевірені)?\s*джерела)\s*:?\s*$",
+    re.IGNORECASE,
+)
 
 
 class SearchService(Protocol):
@@ -68,11 +76,19 @@ class InvalidResearchResultError(RuntimeError):
     """Raised when the research agent returns an invalid state."""
 
 
+class ResearchSearchError(RuntimeError):
+    """Raised when mandatory research search produces no usable sources."""
+
+
 class _WebSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     max_results: int = Field(default=5, ge=1, le=10)
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+def _format_search_tool_error(error: ToolException) -> str:
+    return f"Web search failed: {error}"
 
 
 class ResearchAgent:
@@ -104,6 +120,8 @@ class ResearchAgent:
         if not isinstance(search_message, ToolMessage):
             raise InvalidResearchResultError("Initial search did not return a ToolMessage")
 
+        _validate_initial_search_message(search_message)
+
         state = self._runner.invoke(
             {
                 "messages": [
@@ -126,10 +144,8 @@ class ResearchAgent:
         )
 
         messages = _validate_messages(state.get("messages"))
-        answer = _extract_final_answer(messages)
+        answer = _sanitize_answer(_extract_final_answer(messages))
         sources = _extract_sources(messages)
-
-        _validate_answer_has_no_urls(answer)
 
         return ResearchResult(
             answer=answer,
@@ -183,9 +199,7 @@ def create_web_search_tool(search_service: SearchService) -> BaseTool:
         ),
         args_schema=_WebSearchInput,
         response_format="content_and_artifact",
-        handle_tool_error=(
-            "Web search failed. Explain that fresh sources are temporarily unavailable."
-        ),
+        handle_tool_error=_format_search_tool_error,
         handle_validation_error=("Use a non-empty search query and max_results between 1 and 10."),
     )
 
@@ -217,7 +231,7 @@ def create_research_agent(
 
 
 def _create_initial_search_call(query: str) -> ToolCall:
-    search_query = f"{query} {OFFICIAL_SOURCE_HINT}"[:500]
+    search_query = _build_initial_search_query(query)
 
     return ToolCall(
         name="search_web",
@@ -228,6 +242,44 @@ def _create_initial_search_call(query: str) -> ToolCall:
         id=f"initial-search-{uuid4()}",
         type="tool_call",
     )
+
+
+def _build_initial_search_query(query: str) -> str:
+    search_focus = query
+
+    if not query.isascii():
+        technical_terms: list[str] = []
+        seen_terms: set[str] = set()
+
+        for match in TECHNICAL_TERM_PATTERN.finditer(query):
+            term = match.group(0)
+            term_key = term.casefold()
+
+            if term_key in seen_terms:
+                continue
+
+            seen_terms.add(term_key)
+            technical_terms.append(term)
+
+        if technical_terms:
+            search_focus = " ".join(technical_terms)
+
+    return f"{search_focus} {OFFICIAL_SOURCE_HINT}"[:500]
+
+
+def _validate_initial_search_message(message: ToolMessage) -> None:
+    if message.status == "error":
+        if isinstance(message.content, str):
+            detail = message.content
+        else:
+            detail = "Initial web search failed"
+
+        raise ResearchSearchError(detail)
+
+    artifact = message.artifact
+
+    if not isinstance(artifact, list) or not artifact:
+        raise ResearchSearchError("Initial web search returned no verified sources")
 
 
 def _validate_messages(value: object) -> list[BaseMessage]:
@@ -290,6 +342,26 @@ def _extract_sources(messages: list[BaseMessage]) -> list[SourceItem]:
     return sources
 
 
-def _validate_answer_has_no_urls(answer: str) -> None:
-    if URL_PATTERN.search(answer):
-        raise InvalidResearchResultError("Research agent included a URL in the answer body")
+def _sanitize_answer(answer: str) -> str:
+    sanitized_lines: list[str] = []
+
+    for line in answer.splitlines():
+        if SOURCE_HEADING_PATTERN.fullmatch(line):
+            continue
+
+        if URL_PATTERN.search(line) and URL_LIST_ITEM_PATTERN.match(line):
+            continue
+
+        sanitized_lines.append(URL_PATTERN.sub("", line).rstrip())
+
+    while sanitized_lines and not sanitized_lines[-1].strip():
+        sanitized_lines.pop()
+
+    sanitized = re.sub(r"\n{3,}", "\n\n", "\n".join(sanitized_lines)).strip()
+
+    if not sanitized:
+        raise InvalidResearchResultError(
+            "Research agent returned no usable text after URL sanitization"
+        )
+
+    return sanitized

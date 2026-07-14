@@ -12,9 +12,9 @@ TEST_CASES: tuple[tuple[str, RouteName], ...] = (
 
 
 def main() -> None:
-    """Run live routing checks against the configured Ollama model."""
+    """Run live application graph checks with Ollama and Tavily."""
 
-    print("Building the Ollama-backed graph...")
+    print("Building the live application graph...")
     graph = build_app_graph()
 
     for query, expected_route in TEST_CASES:
@@ -33,6 +33,7 @@ def main() -> None:
 
         actual_route = result["route"]
         response = result["messages"][-1].content
+        sources = result.get("sources", [])
 
         print(f"Expected route: {expected_route}")
         print(f"Actual route:   {actual_route}")
@@ -43,7 +44,23 @@ def main() -> None:
         if actual_route != expected_route:
             raise RuntimeError(f"Expected route {expected_route}, got {actual_route}")
 
-    print("\nAll live router smoke tests passed.")
+        if expected_route == "research":
+            print("Verified sources:")
+
+            for index, source in enumerate(sources, start=1):
+                print(f"[{index}] {source.title}")
+                print(f"    Type: {source.source_type}")
+                print(f"    URL:  {source.url}")
+
+            if not sources:
+                raise RuntimeError("Research route returned no verified sources")
+
+            if not any("langgraph" in f"{source.title} {source.url}".lower() for source in sources):
+                raise RuntimeError("Research route returned no LangGraph-related sources")
+        elif sources:
+            raise RuntimeError(f"Route {expected_route} returned unexpected sources")
+
+    print("\nAll live application graph smoke tests passed.")
 
 
 if __name__ == "__main__":

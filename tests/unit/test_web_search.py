@@ -109,3 +109,34 @@ def test_search_rejects_empty_query() -> None:
 
     with pytest.raises(ValueError, match="must not be empty"):
         service.search("   ")
+
+
+def test_search_truncates_oversized_text_fields() -> None:
+    long_title = "T" * 600
+    long_content = "C" * 6000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": long_title,
+                        "url": "https://docs.example.com/guide",
+                        "content": long_content,
+                        "score": 0.9,
+                    }
+                ]
+            },
+            request=request,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        service = TavilySearchService(
+            SecretStr("test-key"),
+            post=client.post,
+        )
+        results = service.search("Technical documentation")
+
+    assert len(results[0].source.title) == 500
+    assert len(results[0].content) == 5000

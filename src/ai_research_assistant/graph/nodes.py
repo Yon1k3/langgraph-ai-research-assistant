@@ -4,17 +4,27 @@ from typing import Literal, TypeAlias
 from langgraph.types import Command
 
 from ai_research_assistant.graph.state import AppState
-from ai_research_assistant.models import RouteDecision, RouteName
+from ai_research_assistant.models import (
+    ResearchResult,
+    RouteDecision,
+    RouteName,
+)
 
 CoreNodeName: TypeAlias = Literal[
     "direct_answer",
     "unsupported",
+    "research",
     "route_unavailable",
 ]
-ResponseKind: TypeAlias = CoreNodeName
+ResponseKind: TypeAlias = Literal[
+    "direct_answer",
+    "unsupported",
+    "route_unavailable",
+]
 
 RouteClassifier: TypeAlias = Callable[[str], RouteDecision]
 ResponseGenerator: TypeAlias = Callable[[str, str, ResponseKind], str]
+ResearchRunner: TypeAlias = Callable[[str, str], ResearchResult]
 NodeUpdate: TypeAlias = dict[str, object]
 
 
@@ -41,6 +51,9 @@ def resolve_destination(route: RouteName) -> CoreNodeName:
 
     if route == "unsupported":
         return "unsupported"
+
+    if route == "research":
+        return "research"
 
     return "route_unavailable"
 
@@ -88,7 +101,33 @@ def create_response_node(
                     "role": "assistant",
                     "content": response,
                 }
-            ]
+            ],
+            "sources": [],
         }
 
     return response_node
+
+
+def create_research_node(
+    research: ResearchRunner,
+) -> Callable[[AppState], NodeUpdate]:
+    """Create a terminal node backed by the Research Agent."""
+
+    def research_node(state: AppState) -> NodeUpdate:
+        query = get_latest_user_text(state)
+        result = research(
+            query,
+            state["response_language"],
+        )
+
+        return {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": result.answer,
+                }
+            ],
+            "sources": result.sources,
+        }
+
+    return research_node

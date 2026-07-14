@@ -8,6 +8,8 @@ from ai_research_assistant.config import get_settings
 from ai_research_assistant.models import SearchResultItem, SourceItem, SourceType
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+MAX_SOURCE_TITLE_LENGTH = 500
+MAX_SEARCH_CONTENT_LENGTH = 5000
 PostCallable: TypeAlias = Callable[..., httpx.Response]
 
 
@@ -36,9 +38,9 @@ class InvalidSearchResponseError(SearchServiceError):
 
 
 class _TavilyResult(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
+    title: str = Field(min_length=1)
     url: HttpUrl
-    content: str = Field(min_length=1, max_length=5000)
+    content: str = Field(min_length=1)
     score: float = Field(ge=0.0, le=1.0)
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
@@ -126,11 +128,11 @@ class TavilySearchService:
             normalized.append(
                 SearchResultItem(
                     source=SourceItem(
-                        title=item.title,
+                        title=item.title[:MAX_SOURCE_TITLE_LENGTH],
                         url=item.url,
                         source_type=_detect_source_type(item.url),
                     ),
-                    content=item.content,
+                    content=item.content[:MAX_SEARCH_CONTENT_LENGTH],
                     score=item.score,
                 )
             )

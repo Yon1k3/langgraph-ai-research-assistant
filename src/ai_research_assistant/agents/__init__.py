@@ -1,6 +1,7 @@
 from ai_research_assistant.agents.research import (
     InvalidResearchResultError,
     ResearchAgent,
+    ResearchSearchError,
     create_research_agent,
     create_web_search_tool,
 )
@@ -8,6 +9,7 @@ from ai_research_assistant.agents.research import (
 __all__ = [
     "InvalidResearchResultError",
     "ResearchAgent",
+    "ResearchSearchError",
     "create_research_agent",
     "create_web_search_tool",
 ]

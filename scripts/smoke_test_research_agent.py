@@ -28,6 +28,9 @@ def main() -> None:
     if not result.sources:
         raise RuntimeError("Research Agent returned no verified sources")
 
+    if not any("langgraph" in f"{source.title} {source.url}".lower() for source in result.sources):
+        raise RuntimeError("Research Agent returned no LangGraph-related sources")
+
     print("\nResearch Agent smoke test passed.")
 
 
