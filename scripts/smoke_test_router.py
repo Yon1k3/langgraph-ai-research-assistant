@@ -10,6 +10,10 @@ TEST_CASES: tuple[tuple[str, RouteName], ...] = (
         "Поясни актуальні можливості LangGraph і наведи офіційні джерела.",
         "research",
     ),
+    (
+        "Покажи правильний Python-імпорт StateGraph і START з LangGraph.",
+        "code",
+    ),
 )
 OFFICIAL_LANGGRAPH_SOURCE_PREFIXES = (
     "https://docs.langchain.com/",
@@ -119,6 +123,22 @@ def run_application_checks(graph: CoreGraph) -> None:
                     "Research route returned a known grounding regression: "
                     + ", ".join(detected_bad_claims)
                 )
+        elif expected_route == "code":
+            print("Verified sources:")
+
+            for index, source in enumerate(sources, start=1):
+                print(f"[{index}] {source['title']}")
+                print(f"    Type: {source['source_type']}")
+                print(f"    URL:  {source['url']}")
+
+            if not sources:
+                raise RuntimeError("Code route returned no verified sources")
+
+            if "```" not in str(response):
+                raise RuntimeError("Code route returned no fenced code example")
+
+            if claims:
+                raise RuntimeError("Code route returned unexpected factual claims")
         elif sources or claims:
             raise RuntimeError(f"Route {expected_route} returned unexpected evidence")
 

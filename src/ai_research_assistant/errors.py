@@ -78,6 +78,14 @@ class ResearchSearchError(RuntimeError):
     """Raised when mandatory research search produces no usable sources."""
 
 
+class InvalidCodeResultError(RuntimeError):
+    """Raised when the Code Agent returns invalid evidence or output."""
+
+
+class CodeEvidenceError(RuntimeError):
+    """Raised when the Code Agent cannot collect usable official evidence."""
+
+
 def detect_fallback_language(text: str) -> str:
     """Choose a safe supported language when routing fails before classification."""
 
@@ -97,12 +105,13 @@ def map_runtime_error(error: Exception, language: str) -> ErrorInfo | None:
         category = "search_unavailable"
     elif isinstance(error, InvalidSearchResponseError):
         category = "invalid_search_response"
-    elif isinstance(error, ResearchSearchError):
+    elif isinstance(error, (ResearchSearchError, CodeEvidenceError)):
         category = "no_trustworthy_sources"
     elif isinstance(
         error,
         (
             InvalidModelOutputError,
+            InvalidCodeResultError,
             InvalidResearchResultError,
             OutputParserException,
         ),

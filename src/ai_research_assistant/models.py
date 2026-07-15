@@ -192,6 +192,68 @@ class ResearchSynthesis(BaseModel):
         return self
 
 
+class CodeCandidate(BaseModel):
+    """Required structured code candidate produced after evidence coverage checks."""
+
+    explanation: str = Field(min_length=1, max_length=5_000)
+    code: str = Field(min_length=1, max_length=12_000)
+    code_language: str = Field(pattern=r"^[A-Za-z0-9_+.#-]{1,30}$")
+    used_source_ids: list[SourceId] = Field(min_length=1, max_length=5)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @model_validator(mode="after")
+    def validate_code_format(self) -> Self:
+        """Keep Markdown rendering outside the structured code field."""
+
+        if "```" in self.code:
+            raise ValueError("code must not include Markdown fences")
+
+        return self
+
+
+class CodeSynthesis(BaseModel):
+    """Structured code answer produced only from collected technical evidence."""
+
+    explanation: str = Field(default="", max_length=5_000)
+    code: str = Field(default="", max_length=12_000)
+    code_language: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9_+.#-]{1,30}$",
+    )
+    used_source_ids: list[SourceId] = Field(default_factory=list, max_length=5)
+    is_sufficient: bool
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @model_validator(mode="after")
+    def validate_code_contract(self) -> Self:
+        """Require a complete code answer only when evidence is sufficient."""
+
+        if self.is_sufficient:
+            if not self.explanation or not self.code or not self.code_language:
+                raise ValueError(
+                    "explanation, code, and code_language are required when evidence is sufficient"
+                )
+
+            if not self.used_source_ids:
+                raise ValueError("used_source_ids are required when evidence is sufficient")
+
+            if "```" in self.code:
+                raise ValueError("code must not include Markdown fences")
+        elif any(
+            (
+                self.explanation,
+                self.code,
+                self.code_language,
+                self.used_source_ids,
+            )
+        ):
+            raise ValueError("insufficient synthesis must not contain answer data")
+
+        return self
+
+
 class AgentResult(BaseModel):
     """Canonical final result produced by any application route."""
 
@@ -260,6 +322,10 @@ class AgentResult(BaseModel):
 
 class ResearchResult(AgentResult):
     """Canonical result produced by the Research Agent."""
+
+
+class CodeResult(AgentResult):
+    """Canonical result produced by the Code Agent."""
 
 
 class ErrorInfo(BaseModel):
