@@ -10,6 +10,7 @@ class AppState(MessagesState, total=False):
     routing_reason: str | None
     routing_confidence: float | None
     response_language: str
+    resolved_query: str | None
     clarification_question: str | None
     agent_result: AgentResultRecord | None
     error: ErrorInfoRecord | None

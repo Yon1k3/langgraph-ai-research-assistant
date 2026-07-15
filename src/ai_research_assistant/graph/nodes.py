@@ -3,6 +3,10 @@ from typing import Any, Literal, TypeAlias
 
 from langgraph.types import Command, interrupt
 
+from ai_research_assistant.conversation import (
+    ConversationContext,
+    build_conversation_context,
+)
 from ai_research_assistant.errors import (
     InvalidModelOutputError,
     detect_fallback_language,
@@ -33,8 +37,8 @@ ResponseKind: TypeAlias = Literal[
     "route_unavailable",
 ]
 
-RouteClassifier: TypeAlias = Callable[[str], RouteDecision]
-ResponseGenerator: TypeAlias = Callable[[str, str, ResponseKind], str]
+RouteClassifier: TypeAlias = Callable[[ConversationContext], RouteDecision]
+ResponseGenerator: TypeAlias = Callable[[ConversationContext, str, ResponseKind], str]
 ResearchRunner: TypeAlias = Callable[[str, str], ResearchResult]
 NodeUpdate: TypeAlias = dict[str, object]
 
@@ -78,10 +82,11 @@ def create_router_node(
     """Create a router node using the provided classifier."""
 
     def router_node(state: AppState) -> Command[CoreNodeName]:
-        query = get_latest_user_text(state)
+        context = build_conversation_context(state["messages"])
+        query = context.latest_user_query
 
         try:
-            decision = classify(query)
+            decision = classify(context)
         except Exception as exc:
             return _create_runtime_error_command(
                 exc,
@@ -96,6 +101,7 @@ def create_router_node(
                 "routing_reason": decision.reason,
                 "routing_confidence": decision.confidence,
                 "response_language": decision.response_language,
+                "resolved_query": decision.resolved_query,
                 "clarification_question": decision.clarification_question,
                 "agent_result": None,
                 "error": None,
@@ -112,11 +118,11 @@ def create_response_node(
     """Create a response node that writes a canonical agent result."""
 
     def response_node(state: AppState) -> Command[AgentNodeDestination]:
-        query = get_latest_user_text(state)
+        context = build_conversation_context(state["messages"])
         language = state["response_language"]
 
         try:
-            response = generate(query, language, kind)
+            response = generate(context, language, kind)
 
             if not isinstance(response, str) or not response.strip():
                 raise InvalidModelOutputError("Response generator returned no usable text")
@@ -142,11 +148,14 @@ def create_research_node(
     """Create a Research Agent node that writes a canonical agent result."""
 
     def research_node(state: AppState) -> Command[AgentNodeDestination]:
-        query = get_latest_user_text(state)
+        resolved_query = state.get("resolved_query")
         language = state["response_language"]
 
+        if not resolved_query:
+            raise ValueError("Research node requires a resolved query")
+
         try:
-            result = research(query, language)
+            result = research(resolved_query, language)
 
             if not isinstance(result, ResearchResult):
                 raise InvalidModelOutputError("Research runner returned an unexpected result type")
@@ -240,21 +249,17 @@ def create_clarification_node() -> Callable[[AppState], Command[Literal["router"
                 ),
             }
 
-        original_query = get_latest_user_text(state)
-        clarified_query = (
-            f"Original request:\n{original_query}\n\nUser clarification:\n{normalized_answer}"
-        )
-
         return Command(
             goto="router",
             update={
                 "messages": [
                     {
                         "role": "user",
-                        "content": clarified_query,
+                        "content": normalized_answer,
                     }
                 ],
                 "clarification_question": None,
+                "resolved_query": None,
                 "agent_result": None,
                 "error": None,
             },
@@ -286,6 +291,7 @@ def _create_runtime_error_command(
                 "routing_reason": None,
                 "routing_confidence": None,
                 "response_language": language,
+                "resolved_query": None,
                 "clarification_question": None,
             }
         )

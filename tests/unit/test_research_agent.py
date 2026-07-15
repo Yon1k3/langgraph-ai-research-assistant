@@ -407,6 +407,23 @@ def test_research_agent_focuses_non_english_search_on_technical_terms() -> None:
     assert "офіційні джерела" not in search_query
 
 
+def test_research_agent_targets_limitations_for_resolved_follow_up() -> None:
+    runner = FakeRunner()
+    agent, service, synthesizer = make_research_agent(runner)
+
+    result = agent.run("Які мінуси LangGraph?", response_language="uk")
+
+    search_query, _ = service.calls[0]
+    synthesis_query, _, _ = synthesizer.calls[0]
+
+    assert search_query.startswith(
+        "LangGraph official documentation limitations tradeoffs when to use an alternative"
+    )
+    assert synthesis_query == "Які мінуси LangGraph?"
+    assert result.answer.startswith("Не вдалося сформувати надійну відповідь")
+    assert result.sources == []
+
+
 def test_research_agent_targets_release_sources_for_version_request() -> None:
     agent, service, _ = make_research_agent(FakeRunner())
 
@@ -601,6 +618,97 @@ def test_research_agent_ignores_claim_without_exact_supporting_quote() -> None:
 
     assert result.answer.startswith("A reliable answer could not be produced")
     assert result.sources == []
+
+
+def test_research_agent_rejects_positive_evidence_as_a_limitation() -> None:
+    synthesizer = FakeSynthesizer(
+        answer="LangGraph has limited support for agent orchestration.",
+        supporting_quote="LangGraph supports stateful agent orchestration workflows.",
+    )
+    source = make_source()
+    service = FakeSearchService(
+        [
+            make_search_result(
+                source,
+                content="LangGraph supports stateful agent orchestration workflows.",
+            )
+        ]
+    )
+    agent, _, _ = make_research_agent(FakeRunner(), service, synthesizer)
+
+    result = agent.run("What are the limitations of LangGraph?", response_language="en")
+
+    assert result.answer.startswith("A reliable answer could not be produced")
+    assert result.sources == []
+    assert result.claims == []
+
+
+def test_research_agent_accepts_explicit_limitation_evidence() -> None:
+    quote = (
+        "LangGraph does not provide a high-level abstraction; the documentation "
+        "recommends LangChain agents for prebuilt agent architectures."
+    )
+    synthesizer = FakeSynthesizer(
+        answer=(
+            "LangGraph does not provide a high-level abstraction, so the "
+            "documentation recommends LangChain agents for prebuilt architectures."
+        ),
+        supporting_quote=quote,
+    )
+    source = make_source()
+    service = FakeSearchService([make_search_result(source, content=quote)])
+    agent, _, _ = make_research_agent(FakeRunner(), service, synthesizer)
+
+    result = agent.run("What are the limitations of LangGraph?", response_language="en")
+
+    assert len(result.claims) == 1
+    assert len(result.sources) == 1
+
+
+def test_research_agent_attributes_personal_experience() -> None:
+    quote = "The framework kept forcing me into their patterns instead of my design."
+    synthesizer = FakeSynthesizer(
+        answer="LangGraph forces developers to use its design patterns.",
+        supporting_quote=quote,
+    )
+    source = make_source(
+        title="Community discussion about LangGraph",
+        url="https://example.com/community/langgraph",
+        source_type="web",
+    )
+    service = FakeSearchService([make_search_result(source, content=quote)])
+    agent, _, _ = make_research_agent(FakeRunner(), service, synthesizer)
+
+    result = agent.run("What are the limitations of LangGraph?", response_language="en")
+
+    assert result.answer.startswith(
+        "The author of a third-party web source reported that LangGraph"
+    )
+    assert len(result.sources) == 1
+    assert len(result.claims) == 1
+
+
+def test_research_agent_accepts_attributed_personal_experience() -> None:
+    quote = "The framework kept forcing me into their patterns instead of my design."
+    synthesizer = FakeSynthesizer(
+        answer=(
+            "A community user reported that LangGraph pushed their project toward "
+            "the framework's design patterns."
+        ),
+        supporting_quote=quote,
+    )
+    source = make_source(
+        title="Community discussion about LangGraph",
+        url="https://example.com/community/langgraph",
+        source_type="web",
+    )
+    service = FakeSearchService([make_search_result(source, content=quote)])
+    agent, _, _ = make_research_agent(FakeRunner(), service, synthesizer)
+
+    result = agent.run("What are the limitations of LangGraph?", response_language="en")
+
+    assert len(result.claims) == 1
+    assert len(result.sources) == 1
 
 
 def test_research_agent_ignores_claim_about_another_technology() -> None:
