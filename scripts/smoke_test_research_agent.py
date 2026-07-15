@@ -31,6 +31,42 @@ def main() -> None:
     if not any("langgraph" in f"{source.title} {source.url}".lower() for source in result.sources):
         raise RuntimeError("Research Agent returned no LangGraph-related sources")
 
+    official_source_prefixes = (
+        "https://docs.langchain.com/",
+        "https://github.com/langchain-ai/langgraph",
+        "https://langchain-ai.github.io/langgraph",
+    )
+    unexpected_sources = [
+        str(source.url)
+        for source in result.sources
+        if not str(source.url).startswith(official_source_prefixes)
+    ]
+
+    if unexpected_sources:
+        raise RuntimeError(
+            "Research Agent returned non-official sources for an official-source request: "
+            + ", ".join(unexpected_sources)
+        )
+
+    normalized_answer = result.answer.casefold()
+    known_bad_claims = (
+        "версія langchain",
+        "версією langchain",
+        "бібліотека для обробки природної мови",
+        "файлова система",
+        "langsmith hub",
+        "langchain має",
+        "оркестровка",
+        "в лупі",
+    )
+    detected_bad_claims = [claim for claim in known_bad_claims if claim in normalized_answer]
+
+    if detected_bad_claims:
+        raise RuntimeError(
+            "Research Agent returned a known grounding regression: "
+            + ", ".join(detected_bad_claims)
+        )
+
     print("\nResearch Agent smoke test passed.")
 
 

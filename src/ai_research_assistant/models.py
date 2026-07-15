@@ -1,4 +1,4 @@
-from typing import Literal, Self, TypeAlias, TypedDict
+from typing import Annotated, Literal, Self, TypeAlias, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -16,6 +16,7 @@ SourceType: TypeAlias = Literal[
     "web",
     "release_notes",
 ]
+SourceId: TypeAlias = Annotated[str, Field(pattern=r"^src-[0-9a-f]{12}$")]
 
 
 class SourceRecord(TypedDict):
@@ -53,6 +54,48 @@ class SearchResultItem(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class EvidenceItem(BaseModel):
+    """Search evidence available to the grounded synthesis step."""
+
+    source_id: SourceId
+    source: SourceItem
+    content: str = Field(min_length=1, max_length=5000)
+    score: float = Field(ge=0.0, le=1.0)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class GroundedClaim(BaseModel):
+    """One answer claim linked to an exact excerpt from one evidence record."""
+
+    statement: str = Field(min_length=1, max_length=1_000)
+    source_id: SourceId
+    supporting_quote: str = Field(min_length=20, max_length=1_000)
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class ResearchSynthesis(BaseModel):
+    """Structured claims produced only from collected evidence."""
+
+    claims: list[GroundedClaim] = Field(default_factory=list, max_length=6)
+    is_sufficient: bool
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @model_validator(mode="after")
+    def validate_evidence_contract(self) -> Self:
+        """Require grounded claims only when the evidence is sufficient."""
+
+        if self.is_sufficient and not self.claims:
+            raise ValueError("claims are required when evidence is sufficient")
+
+        if not self.is_sufficient and self.claims:
+            raise ValueError("claims must be empty when evidence is insufficient")
+
+        return self
 
 
 class ResearchResult(BaseModel):

@@ -7,13 +7,14 @@ Python libraries, APIs, GitHub projects, and software architecture decisions.
 
 The project is under active development.
 
-Current milestone: checkpointed conversations and Human-in-the-Loop clarification.
+Current milestone: grounded Research Agent with claim-level source verification.
 
 Implemented so far:
 
 - local Ollama chat, structured output, and tool calling;
 - LangGraph request router with direct, unsupported, and research paths;
-- Tavily-backed Research Agent with verified source metadata;
+- Tavily-backed Research Agent with stable evidence IDs, verified supporting quotes,
+  and deterministic source attribution;
 - SQLite short-term conversation persistence by `thread_id`;
 - clarification pause and resume through LangGraph interrupts.
 

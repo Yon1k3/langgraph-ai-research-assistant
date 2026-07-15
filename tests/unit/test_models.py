@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from ai_research_assistant.models import RouteDecision, RouteName
+from ai_research_assistant.models import (
+    GroundedClaim,
+    ResearchSynthesis,
+    RouteDecision,
+    RouteName,
+)
 
 ALL_ROUTES: tuple[RouteName, ...] = (
     "research",
@@ -65,4 +70,59 @@ def test_other_routes_reject_clarification_question() -> None:
             reason="Research is required.",
             response_language="en",
             clarification_question="What exactly do you mean?",
+        )
+
+
+def test_research_synthesis_accepts_grounded_answer() -> None:
+    synthesis = ResearchSynthesis(
+        claims=[
+            GroundedClaim(
+                statement="LangGraph supports stateful workflows.",
+                source_id="src-0123456789ab",
+                supporting_quote="LangGraph supports stateful agent workflows.",
+            )
+        ],
+        is_sufficient=True,
+    )
+
+    assert synthesis.claims[0].source_id == "src-0123456789ab"
+
+
+@pytest.mark.parametrize(
+    ("claims", "is_sufficient"),
+    [
+        (
+            [],
+            True,
+        ),
+        (
+            [
+                {
+                    "statement": "Grounded answer",
+                    "source_id": "src-0123456789ab",
+                    "supporting_quote": "A sufficiently long supporting quote.",
+                }
+            ],
+            False,
+        ),
+        (
+            [
+                {
+                    "statement": "Grounded answer",
+                    "source_id": "invalid-source-id",
+                    "supporting_quote": "A sufficiently long supporting quote.",
+                }
+            ],
+            True,
+        ),
+    ],
+)
+def test_research_synthesis_rejects_invalid_evidence_contract(
+    claims: list[dict[str, object]],
+    is_sufficient: bool,
+) -> None:
+    with pytest.raises(ValidationError):
+        ResearchSynthesis(
+            claims=claims,
+            is_sufficient=is_sufficient,
         )

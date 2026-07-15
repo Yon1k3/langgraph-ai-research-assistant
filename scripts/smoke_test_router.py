@@ -11,6 +11,21 @@ TEST_CASES: tuple[tuple[str, RouteName], ...] = (
         "research",
     ),
 )
+OFFICIAL_LANGGRAPH_SOURCE_PREFIXES = (
+    "https://docs.langchain.com/",
+    "https://github.com/langchain-ai/langgraph",
+    "https://langchain-ai.github.io/langgraph",
+)
+KNOWN_BAD_RESEARCH_CLAIMS = (
+    "версія langchain",
+    "версією langchain",
+    "бібліотека для обробки природної мови",
+    "файлова система",
+    "langsmith hub",
+    "langchain має",
+    "оркестровка",
+    "в лупі",
+)
 
 
 def main() -> None:
@@ -66,6 +81,28 @@ def main() -> None:
                 "langgraph" in f"{source['title']} {source['url']}".lower() for source in sources
             ):
                 raise RuntimeError("Research route returned no LangGraph-related sources")
+
+            unexpected_sources = [
+                source["url"]
+                for source in sources
+                if not source["url"].startswith(OFFICIAL_LANGGRAPH_SOURCE_PREFIXES)
+            ]
+
+            if unexpected_sources:
+                raise RuntimeError(
+                    "Research route returned non-official sources: " + ", ".join(unexpected_sources)
+                )
+
+            normalized_response = str(response).casefold()
+            detected_bad_claims = [
+                claim for claim in KNOWN_BAD_RESEARCH_CLAIMS if claim in normalized_response
+            ]
+
+            if detected_bad_claims:
+                raise RuntimeError(
+                    "Research route returned a known grounding regression: "
+                    + ", ".join(detected_bad_claims)
+                )
         elif sources:
             raise RuntimeError(f"Route {expected_route} returned unexpected sources")
 
