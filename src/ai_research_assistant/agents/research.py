@@ -80,6 +80,11 @@ Rules:
 - Write each claim's statement entirely in the requested language.
 - Every statement must be a conservative translation or paraphrase of its own
   supporting_quote and must not contain facts from any other evidence record.
+- For requests about limitations, drawbacks, or tradeoffs, supporting_quote must
+  explicitly describe a limitation or an alternative. Do not reinterpret a positive
+  capability, the phrase "low-level", or a framework's focus as missing support.
+- Treat first-person experiences from third-party web pages as opinions, not general
+  facts. Attribute such a statement explicitly to an author, user, or community post.
 - Every statement must directly discuss the subject of the user request and be one
   natural, grammatical, self-contained sentence. Avoid generic phrases such as
   "according to the sources" because the application displays sources separately.
@@ -99,6 +104,7 @@ Rules:
 
 OVERVIEW_SOURCE_HINT = "official documentation overview features architecture"
 RELEASE_SOURCE_HINT = "official release notes changelog current version"
+LIMITATION_SOURCE_HINT = "official documentation limitations tradeoffs when to use an alternative"
 MAX_AGENT_EVIDENCE_CONTENT_LENGTH = 1_200
 MAX_SYNTHESIS_EVIDENCE_CONTENT_LENGTH = 1_000
 MAX_SYNTHESIS_EVIDENCE_ITEMS = 3
@@ -107,6 +113,36 @@ RELEASE_INTENT_PATTERN = re.compile(
     r"\b(?:version|versions|release|releases|changelog)\b|версі\w*|реліз\w*",
     re.IGNORECASE,
 )
+LIMITATION_INTENT_PATTERN = re.compile(
+    r"\b(?:limitation|limitations|drawback|drawbacks|disadvantage|disadvantages|"
+    r"tradeoff|tradeoffs|weakness|weaknesses|cons)\b|"
+    r"обмежен\w*|мінус\w*|недолік\w*|слабк\w*",
+    re.IGNORECASE,
+)
+EXPLICIT_LIMITATION_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:limitation|limitations|drawback|drawbacks|disadvantage|disadvantages|"
+    r"trade-?off|tradeoffs|does not|do not|doesn't|cannot|can't|not designed|"
+    r"not intended|not supported|instead|alternative|recommend(?:ed|s)?|requires?)\b|"
+    r"обмежен\w*|недолік\w*|не\s+підтрим\w*|не\s+призначен\w*|натомість|"
+    r"альтернатив\w*|рекоменду\w*|потребу\w*",
+    re.IGNORECASE,
+)
+LOW_LEVEL_ALTERNATIVE_PATTERN = re.compile(
+    r"\blow-level\b.*\b(?:higher-level|prebuilt|instead|recommend(?:ed|s)?)\b|"
+    r"\b(?:higher-level|prebuilt|instead|recommend(?:ed|s)?)\b.*\blow-level\b",
+    re.IGNORECASE,
+)
+PERSONAL_EXPERIENCE_PATTERN = re.compile(
+    r"\b(?:I|I've|I'd|I'm|me|my|mine|we|we've|we'd|we're|our|ours)\b",
+    re.IGNORECASE,
+)
+EXPERIENCE_ATTRIBUTION_PATTERN = re.compile(
+    r"\b(?:author|user|developer|reviewer|community|post|reported|described|"
+    r"argued|according)\b|автор\w*|користувач\w*|розробник\w*|рецензент\w*|"
+    r"спільнот\w*|допис\w*|повідом\w*|опис\w*|за\s+(?:словами|оцінкою)",
+    re.IGNORECASE,
+)
+CYRILLIC_PATTERN = re.compile(r"[А-Яа-яІіЇїЄєҐґ]")
 MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 MARKDOWN_TOKEN_PATTERN = re.compile(r"(?:#{1,6}|[*_`>|])+")
@@ -226,7 +262,11 @@ class ResearchAgent:
         self._search_tool = search_tool
         self._synthesize = synthesize
 
-    def run(self, query: str, response_language: str = "uk") -> ResearchResult:
+    def run(
+        self,
+        query: str,
+        response_language: str = "uk",
+    ) -> ResearchResult:
         """Run one independent research request."""
 
         normalized_query = query.strip()
@@ -546,7 +586,11 @@ def _build_initial_search_query(query: str) -> str:
         seen_terms: set[str] = set()
 
         for match in TECHNICAL_TERM_PATTERN.finditer(query):
-            term = match.group(0)
+            term = match.group(0).rstrip(".")
+
+            if not term:
+                continue
+
             term_key = term.casefold()
 
             if term_key in seen_terms:
@@ -558,9 +602,12 @@ def _build_initial_search_query(query: str) -> str:
         if technical_terms:
             search_focus = " ".join(technical_terms)
 
-    source_hint = (
-        RELEASE_SOURCE_HINT if RELEASE_INTENT_PATTERN.search(query) else OVERVIEW_SOURCE_HINT
-    )
+    if RELEASE_INTENT_PATTERN.search(query):
+        source_hint = RELEASE_SOURCE_HINT
+    elif LIMITATION_INTENT_PATTERN.search(query):
+        source_hint = LIMITATION_SOURCE_HINT
+    else:
+        source_hint = OVERVIEW_SOURCE_HINT
 
     return f"{search_focus} {source_hint}"[:500]
 
@@ -689,7 +736,10 @@ def _extract_subject_terms(query: str) -> list[str]:
     seen_terms: set[str] = set()
 
     for match in TECHNICAL_TERM_PATTERN.finditer(query):
-        normalized_term = match.group(0).casefold()
+        normalized_term = match.group(0).casefold().rstrip(".")
+
+        if not normalized_term:
+            continue
 
         if normalized_term in SUBJECT_STOPWORDS or normalized_term in seen_terms:
             continue
@@ -819,6 +869,7 @@ def _select_verified_claims(
 ) -> list[GroundedClaim]:
     evidence_by_id = {item.source_id: item for item in evidence}
     subject_terms = _extract_subject_terms(query)
+    requires_limitation_evidence = bool(LIMITATION_INTENT_PATTERN.search(query))
     verified_claims: list[GroundedClaim] = []
     seen_statements: set[str] = set()
 
@@ -834,10 +885,20 @@ def _select_verified_claims(
         if normalized_quote.casefold() not in normalized_content.casefold():
             continue
 
+        if requires_limitation_evidence and not _has_explicit_limitation_evidence(normalized_quote):
+            continue
+
         try:
             sanitized_statement = _sanitize_answer(claim.statement)
         except InvalidResearchResultError:
             continue
+
+        if (
+            evidence_item.source.source_type == "web"
+            and PERSONAL_EXPERIENCE_PATTERN.search(normalized_quote)
+            and not EXPERIENCE_ATTRIBUTION_PATTERN.search(sanitized_statement)
+        ):
+            sanitized_statement = _attribute_personal_experience(sanitized_statement)
 
         statement_key = sanitized_statement.casefold()
 
@@ -847,10 +908,34 @@ def _select_verified_claims(
         if statement_key in seen_statements:
             continue
 
+        try:
+            verified_claim = GroundedClaim.model_validate(
+                {
+                    **claim.model_dump(),
+                    "statement": sanitized_statement,
+                }
+            )
+        except ValidationError:
+            continue
+
         seen_statements.add(statement_key)
-        verified_claims.append(claim.model_copy(update={"statement": sanitized_statement}))
+        verified_claims.append(verified_claim)
 
     return verified_claims
+
+
+def _has_explicit_limitation_evidence(quote: str) -> bool:
+    return bool(
+        EXPLICIT_LIMITATION_EVIDENCE_PATTERN.search(quote)
+        or LOW_LEVEL_ALTERNATIVE_PATTERN.search(quote)
+    )
+
+
+def _attribute_personal_experience(statement: str) -> str:
+    if CYRILLIC_PATTERN.search(statement):
+        return f"Автор стороннього вебджерела повідомив, що {statement}"
+
+    return f"The author of a third-party web source reported that {statement}"
 
 
 def _normalize_evidence_text(content: str) -> str:

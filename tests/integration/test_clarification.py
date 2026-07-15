@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from langgraph.types import Command
 
+from ai_research_assistant.conversation import ConversationContext
 from ai_research_assistant.graph.builder import build_core_graph
 from ai_research_assistant.graph.nodes import ResponseKind
 from ai_research_assistant.memory import (
@@ -46,6 +47,75 @@ def test_checkpointer_preserves_messages_in_the_same_thread(tmp_path: Path) -> N
     ]
 
     checkpointer.conn.close()
+
+
+def test_checkpointed_follow_up_uses_recent_conversation_context(tmp_path: Path) -> None:
+    captured_follow_up_contexts: list[ConversationContext] = []
+    captured_research_queries: list[str] = []
+
+    def classify(context: ConversationContext) -> RouteDecision:
+        if context.latest_user_query == "Поясни LangGraph.":
+            return RouteDecision(
+                route="direct_answer",
+                confidence=1.0,
+                reason="Initial technical question.",
+                response_language="uk",
+                resolved_query="Поясни LangGraph.",
+            )
+
+        assert context.latest_user_query == "А які його мінуси?"
+        assert context.contextualized_user_query() == ("Поясни LangGraph.\n\nА які його мінуси?")
+        captured_follow_up_contexts.append(context)
+        return RouteDecision(
+            route="research",
+            confidence=1.0,
+            reason="Technical follow-up resolved from recent context.",
+            response_language="uk",
+            resolved_query="Які мінуси LangGraph?",
+        )
+
+    def generate(
+        context: ConversationContext,
+        language: str,
+        kind: ResponseKind,
+    ) -> str:
+        assert context.latest_user_query == "Поясни LangGraph."
+        return "LangGraph — це фреймворк оркестрації."
+
+    def research(
+        query: str,
+        language: str,
+    ) -> ResearchResult:
+        captured_research_queries.append(query)
+        return ResearchResult(answer="Перевірені обмеження LangGraph.")
+
+    with open_sqlite_checkpointer(tmp_path / "follow-up.sqlite3") as checkpointer:
+        graph = build_core_graph(
+            classify=classify,
+            generate=generate,
+            research=research,
+            checkpointer=checkpointer,
+        )
+        config = {"configurable": {"thread_id": "follow-up-thread"}}
+
+        graph.invoke(
+            {"messages": [{"role": "user", "content": "Поясни LangGraph."}]},
+            config=config,
+        )
+        result = graph.invoke(
+            {"messages": [{"role": "user", "content": "А які його мінуси?"}]},
+            config=config,
+        )
+
+    assert result["route"] == "research"
+    assert result["messages"][-1].content == "Перевірені обмеження LangGraph."
+    assert captured_research_queries == ["Які мінуси LangGraph?"]
+    assert len(captured_follow_up_contexts) == 1
+    assert [message.role for message in captured_follow_up_contexts[0].messages] == [
+        "user",
+        "assistant",
+        "user",
+    ]
 
 
 def test_managed_checkpointer_closes_connection_on_exit(tmp_path: Path) -> None:
@@ -188,8 +258,7 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
 
     assert result["route"] == "direct_answer"
     assert result["clarification_question"] is None
-    assert result["messages"][-1].content.startswith("direct_answer:en:Original request:")
-    assert "A LangGraph agent with web search." in result["messages"][-1].content
+    assert result["messages"][-1].content == ("direct_answer:en:A LangGraph agent with web search.")
 
     second_checkpointer.conn.close()
 
@@ -227,19 +296,24 @@ def test_clarification_reprompts_for_empty_resume(tmp_path: Path) -> None:
     checkpointer.conn.close()
 
 
-def _classify_clarification_then_direct_answer(query: str) -> RouteDecision:
+def _classify_clarification_then_direct_answer(
+    context: ConversationContext,
+) -> RouteDecision:
+    query = context.latest_user_query
+
     if query == "Help me with an agent.":
         return RouteDecision(
             route="clarification",
             confidence=0.9,
             reason="The request needs more detail.",
             response_language="en",
+            resolved_query="Help with an agent.",
             clarification_question="What kind of agent are you building?",
         )
 
-    assert query == (
-        "Original request:\nHelp me with an agent.\n\n"
-        "User clarification:\nA LangGraph agent with web search."
+    assert query == "A LangGraph agent with web search."
+    assert context.contextualized_user_query() == (
+        "Help me with an agent.\n\nA LangGraph agent with web search."
     )
 
     return RouteDecision(
@@ -247,30 +321,42 @@ def _classify_clarification_then_direct_answer(query: str) -> RouteDecision:
         confidence=0.95,
         reason="The clarified request is specific enough.",
         response_language="en",
+        resolved_query="Help with a LangGraph agent that uses web search.",
     )
 
 
-def _classify_direct_answer(query: str) -> RouteDecision:
+def _classify_direct_answer(context: ConversationContext) -> RouteDecision:
+    query = context.latest_user_query
     return RouteDecision(
         route="direct_answer",
         confidence=1.0,
         reason=f"Direct response for {query}.",
         response_language="en",
+        resolved_query=query,
     )
 
 
-def _classify_research(query: str) -> RouteDecision:
+def _classify_research(context: ConversationContext) -> RouteDecision:
+    query = context.latest_user_query
     return RouteDecision(
         route="research",
         confidence=1.0,
         reason=f"Research response for {query}.",
         response_language="en",
+        resolved_query=query,
     )
 
 
-def _generate_response(query: str, language: str, kind: ResponseKind) -> str:
-    return f"{kind}:{language}:{query}"
+def _generate_response(
+    context: ConversationContext,
+    language: str,
+    kind: ResponseKind,
+) -> str:
+    return f"{kind}:{language}:{context.latest_user_query}"
 
 
-def _unexpected_research(query: str, language: str) -> ResearchResult:
+def _unexpected_research(
+    query: str,
+    language: str,
+) -> ResearchResult:
     raise AssertionError(f"Unexpected Research Agent call: {language}:{query}")

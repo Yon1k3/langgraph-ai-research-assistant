@@ -286,9 +286,10 @@ class RouteDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1, max_length=300)
     response_language: str = Field(min_length=2, max_length=20)
+    resolved_query: str = Field(min_length=1, max_length=1_000)
     clarification_question: str | None = Field(default=None, max_length=500)
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     @model_validator(mode="after")
     def validate_clarification_question(self) -> Self:

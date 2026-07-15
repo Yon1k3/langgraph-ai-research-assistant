@@ -32,6 +32,7 @@ def test_route_decision_accepts_supported_routes(route: RouteName) -> None:
         confidence=0.8,
         reason="The request matches this route.",
         response_language="en",
+        resolved_query="Resolved technical request.",
         clarification_question=clarification_question,
     )
 
@@ -46,6 +47,7 @@ def test_route_decision_rejects_invalid_confidence(confidence: float) -> None:
             confidence=confidence,
             reason="Greeting detected.",
             response_language="en",
+            resolved_query="Hello.",
         )
 
 
@@ -59,6 +61,7 @@ def test_clarification_route_requires_question() -> None:
             confidence=0.6,
             reason="The request is ambiguous.",
             response_language="en",
+            resolved_query="Help with a technical task.",
         )
 
 
@@ -72,7 +75,19 @@ def test_other_routes_reject_clarification_question() -> None:
             confidence=0.9,
             reason="Research is required.",
             response_language="en",
+            resolved_query="Research LangGraph.",
             clarification_question="What exactly do you mean?",
+        )
+
+
+def test_route_decision_rejects_empty_resolved_query() -> None:
+    with pytest.raises(ValidationError):
+        RouteDecision(
+            route="research",
+            confidence=0.9,
+            reason="Research is required.",
+            response_language="en",
+            resolved_query="   ",
         )
 
 

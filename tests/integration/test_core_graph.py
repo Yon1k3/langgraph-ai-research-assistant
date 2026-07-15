@@ -1,5 +1,6 @@
 import pytest
 
+from ai_research_assistant.conversation import ConversationContext
 from ai_research_assistant.errors import ModelUnavailableError
 from ai_research_assistant.graph.builder import build_core_graph
 from ai_research_assistant.graph.nodes import (
@@ -24,7 +25,8 @@ from ai_research_assistant.tools.web_search import (
 def create_fake_classifier(route: RouteName) -> RouteClassifier:
     """Create a deterministic classifier for an offline graph test."""
 
-    def classify(query: str) -> RouteDecision:
+    def classify(context: ConversationContext) -> RouteDecision:
+        query = context.latest_user_query
         assert query == "Test request"
 
         return RouteDecision(
@@ -32,6 +34,7 @@ def create_fake_classifier(route: RouteName) -> RouteClassifier:
             confidence=0.9,
             reason=f"Selected {route} for the test.",
             response_language="en",
+            resolved_query=query,
             clarification_question=(
                 "What exactly do you want to know?" if route == "clarification" else None
             ),
@@ -41,13 +44,13 @@ def create_fake_classifier(route: RouteName) -> RouteClassifier:
 
 
 def fake_response_generator(
-    query: str,
+    context: ConversationContext,
     language: str,
     kind: ResponseKind,
 ) -> str:
     """Return a deterministic response without using an LLM."""
 
-    return f"{kind}:{language}:{query}"
+    return f"{kind}:{language}:{context.latest_user_query}"
 
 
 def unexpected_research_runner(
@@ -102,6 +105,7 @@ def test_core_graph_routes_to_expected_non_research_node(
     assert result["route"] == route
     assert result["routing_confidence"] == 0.9
     assert result["response_language"] == "en"
+    assert result["resolved_query"] == "Test request"
     assert result["messages"][-1].content == (f"{expected_response_kind}:en:Test request")
     assert result["agent_result"]["sources"] == []
     assert result["agent_result"]["claims"] == []
@@ -165,8 +169,8 @@ def test_core_graph_runs_research_agent_and_returns_sources() -> None:
 
 
 def test_core_graph_returns_safe_error_when_model_is_unavailable() -> None:
-    def unavailable_classifier(query: str) -> RouteDecision:
-        raise ModelUnavailableError(f"Secret provider detail for {query}")
+    def unavailable_classifier(context: ConversationContext) -> RouteDecision:
+        raise ModelUnavailableError(f"Secret provider detail for {context.latest_user_query}")
 
     graph = build_core_graph(
         classify=unavailable_classifier,
@@ -180,6 +184,7 @@ def test_core_graph_returns_safe_error_when_model_is_unavailable() -> None:
             "route": "research",
             "routing_reason": "Stale routing decision",
             "routing_confidence": 1.0,
+            "resolved_query": "Stale resolved query",
         }
     )
 
@@ -187,13 +192,17 @@ def test_core_graph_returns_safe_error_when_model_is_unavailable() -> None:
     assert result["route"] is None
     assert result["routing_reason"] is None
     assert result["routing_confidence"] is None
+    assert result["resolved_query"] is None
     assert "Secret provider detail" not in result["messages"][-1].content
     assert result["agent_result"]["answer"] == result["messages"][-1].content
     assert result["agent_result"]["sources"] == []
 
 
 def test_core_graph_returns_safe_error_when_research_search_is_unavailable() -> None:
-    def unavailable_research(query: str, language: str) -> ResearchResult:
+    def unavailable_research(
+        query: str,
+        language: str,
+    ) -> ResearchResult:
         raise SearchUnavailableError(f"Private service detail for {language}:{query}")
 
     graph = build_core_graph(
@@ -210,7 +219,10 @@ def test_core_graph_returns_safe_error_when_research_search_is_unavailable() -> 
 
 
 def test_core_graph_explains_missing_search_configuration() -> None:
-    def unconfigured_research(query: str, language: str) -> ResearchResult:
+    def unconfigured_research(
+        query: str,
+        language: str,
+    ) -> ResearchResult:
         raise SearchConfigurationError(f"Missing search key for {language}:{query}")
 
     graph = build_core_graph(
@@ -228,7 +240,7 @@ def test_core_graph_explains_missing_search_configuration() -> None:
 
 def test_core_graph_returns_safe_error_for_invalid_generated_response() -> None:
     def empty_response_generator(
-        query: str,
+        context: ConversationContext,
         language: str,
         kind: ResponseKind,
     ) -> str:
@@ -247,8 +259,8 @@ def test_core_graph_returns_safe_error_for_invalid_generated_response() -> None:
 
 
 def test_core_graph_does_not_hide_programming_errors() -> None:
-    def broken_classifier(query: str) -> RouteDecision:
-        raise AssertionError(f"Programming bug for {query}")
+    def broken_classifier(context: ConversationContext) -> RouteDecision:
+        raise AssertionError(f"Programming bug for {context.latest_user_query}")
 
     graph = build_core_graph(
         classify=broken_classifier,
