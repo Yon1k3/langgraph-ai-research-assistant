@@ -15,6 +15,7 @@ from ai_research_assistant.errors import (
 from ai_research_assistant.graph.state import AppState
 from ai_research_assistant.models import (
     AgentResult,
+    CodeResult,
     ErrorInfo,
     ResearchResult,
     RouteDecision,
@@ -25,6 +26,7 @@ CoreNodeName: TypeAlias = Literal[
     "direct_answer",
     "unsupported",
     "research",
+    "code",
     "clarification",
     "route_unavailable",
     "error",
@@ -40,6 +42,7 @@ ResponseKind: TypeAlias = Literal[
 RouteClassifier: TypeAlias = Callable[[ConversationContext], RouteDecision]
 ResponseGenerator: TypeAlias = Callable[[ConversationContext, str, ResponseKind], str]
 ResearchRunner: TypeAlias = Callable[[str, str], ResearchResult]
+CodeRunner: TypeAlias = Callable[[str, str], CodeResult]
 NodeUpdate: TypeAlias = dict[str, object]
 
 
@@ -69,6 +72,9 @@ def resolve_destination(route: RouteName) -> CoreNodeName:
 
     if route == "research":
         return "research"
+
+    if route == "code":
+        return "code"
 
     if route == "clarification":
         return "clarification"
@@ -173,6 +179,39 @@ def create_research_node(
         )
 
     return research_node
+
+
+def create_code_node(
+    code: CodeRunner,
+) -> Callable[[AppState], Command[AgentNodeDestination]]:
+    """Create a Code Agent node that writes a canonical agent result."""
+
+    def code_node(state: AppState) -> Command[AgentNodeDestination]:
+        resolved_query = state.get("resolved_query")
+        language = state["response_language"]
+
+        if not resolved_query:
+            raise ValueError("Code node requires a resolved query")
+
+        try:
+            result = code(resolved_query, language)
+
+            if not isinstance(result, CodeResult):
+                raise InvalidModelOutputError("Code runner returned an unexpected result type")
+
+            result_record = result.to_record()
+        except Exception as exc:
+            return _create_runtime_error_command(exc, language)
+
+        return Command(
+            goto="finalize",
+            update={
+                "agent_result": result_record,
+                "error": None,
+            },
+        )
+
+    return code_node
 
 
 def create_error_node() -> Callable[[AppState], NodeUpdate]:

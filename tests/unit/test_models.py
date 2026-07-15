@@ -3,6 +3,8 @@ from pydantic import ValidationError
 
 from ai_research_assistant.models import (
     AgentResult,
+    CodeCandidate,
+    CodeSynthesis,
     GroundedClaim,
     ResearchSynthesis,
     RouteDecision,
@@ -144,6 +146,66 @@ def test_research_synthesis_rejects_invalid_evidence_contract(
             claims=claims,
             is_sufficient=is_sufficient,
         )
+
+
+def test_code_synthesis_accepts_complete_grounded_answer() -> None:
+    synthesis = CodeSynthesis(
+        explanation="Create and compile the graph.",
+        code="graph = builder.compile()",
+        code_language="python",
+        used_source_ids=["src-0123456789ab"],
+        is_sufficient=True,
+    )
+
+    assert synthesis.code_language == "python"
+
+
+def test_code_candidate_requires_complete_non_fenced_output() -> None:
+    candidate = CodeCandidate(
+        explanation="Use the documented API.",
+        code="print('ok')",
+        code_language="python",
+        used_source_ids=["src-0123456789ab"],
+    )
+
+    assert candidate.code == "print('ok')"
+
+    with pytest.raises(ValidationError):
+        CodeCandidate(
+            explanation="Invalid fenced output.",
+            code="```python\nprint('bad')\n```",
+            code_language="python",
+            used_source_ids=["src-0123456789ab"],
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "explanation": "Missing code.",
+            "code_language": "python",
+            "used_source_ids": ["src-0123456789ab"],
+            "is_sufficient": True,
+        },
+        {
+            "explanation": "Includes a Markdown fence.",
+            "code": "```python\nprint('unsafe format')\n```",
+            "code_language": "python",
+            "used_source_ids": ["src-0123456789ab"],
+            "is_sufficient": True,
+        },
+        {
+            "code": "print('unexpected')",
+            "is_sufficient": False,
+        },
+    ],
+)
+def test_code_synthesis_rejects_incomplete_or_inconsistent_output(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        CodeSynthesis.model_validate(payload)
 
 
 def test_agent_result_round_trips_through_checkpoint_safe_record() -> None:

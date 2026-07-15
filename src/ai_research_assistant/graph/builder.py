@@ -7,13 +7,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
-from ai_research_assistant.agents import create_research_agent
+from ai_research_assistant.agents import create_code_agent, create_research_agent
 from ai_research_assistant.config import get_settings
 from ai_research_assistant.graph.nodes import (
+    CodeRunner,
     ResearchRunner,
     ResponseGenerator,
     RouteClassifier,
     create_clarification_node,
+    create_code_node,
     create_error_node,
     create_finalize_node,
     create_research_node,
@@ -40,6 +42,7 @@ def build_core_graph(
     classify: RouteClassifier,
     generate: ResponseGenerator,
     research: ResearchRunner,
+    code: CodeRunner,
     checkpointer: Checkpointer = None,
 ) -> CoreGraph:
     """Build and compile the core application graph."""
@@ -54,6 +57,7 @@ def build_core_graph(
         create_response_node("unsupported", generate)
     )
     research_node: RunnableLambda[AppState, Any] = RunnableLambda(create_research_node(research))
+    code_node: RunnableLambda[AppState, Any] = RunnableLambda(create_code_node(code))
     clarification: RunnableLambda[AppState, Any] = RunnableLambda(create_clarification_node())
     error: RunnableLambda[AppState, Any] = RunnableLambda(create_error_node())
     finalize: RunnableLambda[AppState, Any] = RunnableLambda(create_finalize_node())
@@ -68,6 +72,7 @@ def build_core_graph(
             "direct_answer",
             "unsupported",
             "research",
+            "code",
             "clarification",
             "route_unavailable",
             "error",
@@ -86,6 +91,11 @@ def build_core_graph(
     builder.add_node(
         "research",
         research_node,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node(
+        "code",
+        code_node,
         destinations=("finalize", "error"),
     )
     builder.add_node("clarification", clarification, destinations=("router",))
@@ -110,11 +120,13 @@ def build_app_graph(*, checkpointer: Checkpointer) -> CoreGraph:
 
     model = create_chat_model()
     research_agent = create_research_agent(model=model)
+    code_agent = create_code_agent(model=model)
 
     return build_core_graph(
         classify=create_ollama_route_classifier(model),
         generate=create_ollama_response_generator(model),
         research=research_agent.run,
+        code=code_agent.run,
         checkpointer=checkpointer,
     )
 

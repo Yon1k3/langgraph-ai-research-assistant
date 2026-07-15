@@ -9,6 +9,7 @@ from ai_research_assistant.graph.nodes import (
 )
 from ai_research_assistant.models import (
     AgentResult,
+    CodeResult,
     GroundedClaim,
     ResearchResult,
     RouteDecision,
@@ -62,12 +63,20 @@ def unexpected_research_runner(
     raise AssertionError(f"Research Agent was called unexpectedly: {language}:{query}")
 
 
+def unexpected_code_runner(
+    query: str,
+    language: str,
+) -> CodeResult:
+    """Fail if a non-code route invokes the Code Agent."""
+
+    raise AssertionError(f"Code Agent was called unexpectedly: {language}:{query}")
+
+
 @pytest.mark.parametrize(
     ("route", "expected_response_kind"),
     (
         ("direct_answer", "direct_answer"),
         ("unsupported", "unsupported"),
-        ("code", "route_unavailable"),
         ("comparison", "route_unavailable"),
     ),
 )
@@ -88,6 +97,7 @@ def test_core_graph_routes_to_expected_non_research_node(
         classify=create_fake_classifier(route),
         generate=fake_response_generator,
         research=unexpected_research_runner,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke(
@@ -142,6 +152,7 @@ def test_core_graph_runs_research_agent_and_returns_sources() -> None:
         classify=create_fake_classifier("research"),
         generate=fake_response_generator,
         research=fake_research_runner,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke(
@@ -168,6 +179,47 @@ def test_core_graph_runs_research_agent_and_returns_sources() -> None:
     assert result["error"] is None
 
 
+def test_core_graph_runs_code_agent_and_returns_sources() -> None:
+    source = SourceItem(
+        title="LangGraph graph API",
+        url="https://docs.langchain.com/oss/python/langgraph/use-graph-api",
+        source_type="documentation",
+    )
+    source_reference = SourceReference.from_source(source)
+
+    def fake_code_runner(
+        query: str,
+        language: str,
+    ) -> CodeResult:
+        assert query == "Test request"
+        assert language == "en"
+
+        return CodeResult(
+            answer="Example\n\n```python\nprint('ok')\n```",
+            sources=[source_reference],
+        )
+
+    graph = build_core_graph(
+        classify=create_fake_classifier("code"),
+        generate=fake_response_generator,
+        research=unexpected_research_runner,
+        code=fake_code_runner,
+    )
+
+    result = graph.invoke({"messages": [{"role": "user", "content": "Test request"}]})
+
+    assert result["route"] == "code"
+    assert result["messages"][-1].content == "Example\n\n```python\nprint('ok')\n```"
+    assert (
+        result["agent_result"]
+        == CodeResult(
+            answer="Example\n\n```python\nprint('ok')\n```",
+            sources=[source_reference],
+        ).to_record()
+    )
+    assert result["error"] is None
+
+
 def test_core_graph_returns_safe_error_when_model_is_unavailable() -> None:
     def unavailable_classifier(context: ConversationContext) -> RouteDecision:
         raise ModelUnavailableError(f"Secret provider detail for {context.latest_user_query}")
@@ -176,6 +228,7 @@ def test_core_graph_returns_safe_error_when_model_is_unavailable() -> None:
         classify=unavailable_classifier,
         generate=fake_response_generator,
         research=unexpected_research_runner,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke(
@@ -209,6 +262,7 @@ def test_core_graph_returns_safe_error_when_research_search_is_unavailable() -> 
         classify=create_fake_classifier("research"),
         generate=fake_response_generator,
         research=unavailable_research,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke({"messages": [{"role": "user", "content": "Test request"}]})
@@ -229,6 +283,7 @@ def test_core_graph_explains_missing_search_configuration() -> None:
         classify=create_fake_classifier("research"),
         generate=fake_response_generator,
         research=unconfigured_research,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke({"messages": [{"role": "user", "content": "Test request"}]})
@@ -250,6 +305,7 @@ def test_core_graph_returns_safe_error_for_invalid_generated_response() -> None:
         classify=create_fake_classifier("direct_answer"),
         generate=empty_response_generator,
         research=unexpected_research_runner,
+        code=unexpected_code_runner,
     )
 
     result = graph.invoke({"messages": [{"role": "user", "content": "Test request"}]})
@@ -266,6 +322,7 @@ def test_core_graph_does_not_hide_programming_errors() -> None:
         classify=broken_classifier,
         generate=fake_response_generator,
         research=unexpected_research_runner,
+        code=unexpected_code_runner,
     )
 
     with pytest.raises(AssertionError, match="Programming bug"):

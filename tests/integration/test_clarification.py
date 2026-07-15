@@ -13,6 +13,7 @@ from ai_research_assistant.memory import (
 )
 from ai_research_assistant.models import (
     AgentResult,
+    CodeResult,
     ResearchResult,
     RouteDecision,
     SourceItem,
@@ -26,6 +27,7 @@ def test_checkpointer_preserves_messages_in_the_same_thread(tmp_path: Path) -> N
         classify=_classify_direct_answer,
         generate=_generate_response,
         research=_unexpected_research,
+        code=_unexpected_code,
         checkpointer=checkpointer,
     )
     config = {"configurable": {"thread_id": "conversation-thread"}}
@@ -94,6 +96,7 @@ def test_checkpointed_follow_up_uses_recent_conversation_context(tmp_path: Path)
             classify=classify,
             generate=generate,
             research=research,
+            code=_unexpected_code,
             checkpointer=checkpointer,
         )
         config = {"configurable": {"thread_id": "follow-up-thread"}}
@@ -132,6 +135,7 @@ def test_checkpointer_isolates_conversation_threads(tmp_path: Path) -> None:
         classify=_classify_direct_answer,
         generate=_generate_response,
         research=_unexpected_research,
+        code=_unexpected_code,
         checkpointer=checkpointer,
     )
     first_config = {"configurable": {"thread_id": "first-thread"}}
@@ -176,6 +180,7 @@ def test_sqlite_checkpointer_serializes_research_sources(tmp_path: Path) -> None
             answer=f"Research answer for {language}:{query}",
             sources=[source_reference],
         ),
+        code=_unexpected_code,
         checkpointer=checkpointer,
     )
 
@@ -204,6 +209,7 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
         classify=_classify_clarification_then_direct_answer,
         generate=_generate_response,
         research=_unexpected_research,
+        code=_unexpected_code,
         checkpointer=first_checkpointer,
     )
     config = {"configurable": {"thread_id": "clarification-thread"}}
@@ -248,6 +254,7 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
         classify=_classify_clarification_then_direct_answer,
         generate=_generate_response,
         research=_unexpected_research,
+        code=_unexpected_code,
         checkpointer=second_checkpointer,
     )
 
@@ -269,6 +276,7 @@ def test_clarification_reprompts_for_empty_resume(tmp_path: Path) -> None:
         classify=_classify_clarification_then_direct_answer,
         generate=_generate_response,
         research=_unexpected_research,
+        code=_unexpected_code,
         checkpointer=checkpointer,
     )
     config = {"configurable": {"thread_id": "clarification-retry-thread"}}
@@ -360,3 +368,10 @@ def _unexpected_research(
     language: str,
 ) -> ResearchResult:
     raise AssertionError(f"Unexpected Research Agent call: {language}:{query}")
+
+
+def _unexpected_code(
+    query: str,
+    language: str,
+) -> CodeResult:
+    raise AssertionError(f"Unexpected Code Agent call: {language}:{query}")
