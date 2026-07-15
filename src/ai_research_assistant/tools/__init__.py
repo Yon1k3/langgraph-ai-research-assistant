@@ -1,3 +1,22 @@
+from ai_research_assistant.tools.documentation_search import (
+    OfficialDocumentationSearchService,
+    create_official_documentation_search_service,
+    create_official_documentation_tool,
+)
+from ai_research_assistant.tools.github_search import (
+    GitHubAuthenticationError,
+    GitHubConfigurationError,
+    GitHubInvalidRequestError,
+    GitHubNotFoundError,
+    GitHubPermissionError,
+    GitHubRateLimitError,
+    GitHubSearchService,
+    GitHubServiceError,
+    GitHubUnavailableError,
+    InvalidGitHubResponseError,
+    create_github_search_service,
+    create_github_tools,
+)
 from ai_research_assistant.tools.web_search import (
     InvalidSearchResponseError,
     LazyTavilySearchService,
@@ -13,14 +32,29 @@ from ai_research_assistant.tools.web_search import (
 )
 
 __all__ = [
+    "GitHubAuthenticationError",
+    "GitHubConfigurationError",
+    "GitHubInvalidRequestError",
+    "GitHubNotFoundError",
+    "GitHubPermissionError",
+    "GitHubRateLimitError",
+    "GitHubSearchService",
+    "GitHubServiceError",
+    "GitHubUnavailableError",
     "InvalidSearchResponseError",
+    "InvalidGitHubResponseError",
     "LazyTavilySearchService",
+    "OfficialDocumentationSearchService",
     "SearchAuthenticationError",
     "SearchConfigurationError",
     "SearchRateLimitError",
     "SearchUnavailableError",
     "TavilySearchService",
+    "create_github_search_service",
+    "create_github_tools",
     "create_lazy_tavily_search_service",
+    "create_official_documentation_search_service",
+    "create_official_documentation_tool",
     "create_tavily_search_service",
     "format_search_service_error",
     "parse_search_service_error",

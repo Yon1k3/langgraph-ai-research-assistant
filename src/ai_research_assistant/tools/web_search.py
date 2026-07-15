@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TypeAlias
 
 import httpx
@@ -64,7 +64,13 @@ class TavilySearchService:
         self._api_key = api_key
         self._post = post
 
-    def search(self, query: str, max_results: int = 5) -> list[SearchResultItem]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        *,
+        include_domains: Sequence[str] | None = None,
+    ) -> list[SearchResultItem]:
         """Return normalized, URL-deduplicated Tavily search results."""
 
         normalized_query = query.strip()
@@ -75,6 +81,17 @@ class TavilySearchService:
         if not 1 <= max_results <= 10:
             raise ValueError("max_results must be between 1 and 10")
 
+        request_payload: dict[str, object] = {
+            "query": normalized_query,
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": False,
+            "include_raw_content": False,
+        }
+
+        if include_domains:
+            request_payload["include_domains"] = list(include_domains)
+
         try:
             response = self._post(
                 TAVILY_SEARCH_URL,
@@ -82,13 +99,7 @@ class TavilySearchService:
                     "Authorization": f"Bearer {self._api_key.get_secret_value()}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "query": normalized_query,
-                    "search_depth": "basic",
-                    "max_results": max_results,
-                    "include_answer": False,
-                    "include_raw_content": False,
-                },
+                json=request_payload,
                 timeout=10.0,
             )
         except (httpx.TimeoutException, httpx.RequestError) as exc:
@@ -151,13 +162,23 @@ class LazyTavilySearchService:
         self._factory = factory or create_tavily_search_service
         self._service: TavilySearchService | None = None
 
-    def search(self, query: str, max_results: int = 5) -> list[SearchResultItem]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        *,
+        include_domains: Sequence[str] | None = None,
+    ) -> list[SearchResultItem]:
         """Delegate to one lazily created Tavily service instance."""
 
         if self._service is None:
             self._service = self._factory()
 
-        return self._service.search(query=query, max_results=max_results)
+        return self._service.search(
+            query=query,
+            max_results=max_results,
+            include_domains=include_domains,
+        )
 
 
 def create_tavily_search_service() -> TavilySearchService:

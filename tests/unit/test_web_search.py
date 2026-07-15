@@ -144,6 +144,24 @@ def test_search_truncates_oversized_text_fields() -> None:
     assert len(results[0].content) == 5000
 
 
+def test_search_sends_explicit_domain_allowlist() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["include_domains"] == ["docs.langchain.com"]
+        return httpx.Response(200, json={"results": []}, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        service = TavilySearchService(SecretStr("test-key"), post=client.post)
+
+        assert (
+            service.search(
+                "LangGraph docs",
+                include_domains=["docs.langchain.com"],
+            )
+            == []
+        )
+
+
 def test_lazy_search_creates_one_service_on_first_use() -> None:
     factory_calls = 0
 
