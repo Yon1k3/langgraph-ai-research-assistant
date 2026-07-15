@@ -1,10 +1,17 @@
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from langgraph.types import Command, interrupt
 
+from ai_research_assistant.errors import (
+    InvalidModelOutputError,
+    detect_fallback_language,
+    map_runtime_error,
+)
 from ai_research_assistant.graph.state import AppState
 from ai_research_assistant.models import (
+    AgentResult,
+    ErrorInfo,
     ResearchResult,
     RouteDecision,
     RouteName,
@@ -16,7 +23,10 @@ CoreNodeName: TypeAlias = Literal[
     "research",
     "clarification",
     "route_unavailable",
+    "error",
+    "finalize",
 ]
+AgentNodeDestination: TypeAlias = Literal["finalize", "error"]
 ResponseKind: TypeAlias = Literal[
     "direct_answer",
     "unsupported",
@@ -69,7 +79,15 @@ def create_router_node(
 
     def router_node(state: AppState) -> Command[CoreNodeName]:
         query = get_latest_user_text(state)
-        decision = classify(query)
+
+        try:
+            decision = classify(query)
+        except Exception as exc:
+            return _create_runtime_error_command(
+                exc,
+                detect_fallback_language(query),
+                clear_routing=True,
+            )
 
         return Command(
             goto=resolve_destination(decision.route),
@@ -79,6 +97,8 @@ def create_router_node(
                 "routing_confidence": decision.confidence,
                 "response_language": decision.response_language,
                 "clarification_question": decision.clarification_question,
+                "agent_result": None,
+                "error": None,
             },
         )
 
@@ -88,41 +108,94 @@ def create_router_node(
 def create_response_node(
     kind: ResponseKind,
     generate: ResponseGenerator,
-) -> Callable[[AppState], NodeUpdate]:
-    """Create a terminal response node."""
+) -> Callable[[AppState], Command[AgentNodeDestination]]:
+    """Create a response node that writes a canonical agent result."""
 
-    def response_node(state: AppState) -> NodeUpdate:
+    def response_node(state: AppState) -> Command[AgentNodeDestination]:
         query = get_latest_user_text(state)
-        response = generate(
-            query,
-            state["response_language"],
-            kind,
-        )
+        language = state["response_language"]
 
-        return {
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": response,
-                }
-            ],
-            "sources": [],
-        }
+        try:
+            response = generate(query, language, kind)
+
+            if not isinstance(response, str) or not response.strip():
+                raise InvalidModelOutputError("Response generator returned no usable text")
+
+            result = AgentResult(answer=response)
+        except Exception as exc:
+            return _create_runtime_error_command(exc, language)
+
+        return Command(
+            goto="finalize",
+            update={
+                "agent_result": result.to_record(),
+                "error": None,
+            },
+        )
 
     return response_node
 
 
 def create_research_node(
     research: ResearchRunner,
-) -> Callable[[AppState], NodeUpdate]:
-    """Create a terminal node backed by the Research Agent."""
+) -> Callable[[AppState], Command[AgentNodeDestination]]:
+    """Create a Research Agent node that writes a canonical agent result."""
 
-    def research_node(state: AppState) -> NodeUpdate:
+    def research_node(state: AppState) -> Command[AgentNodeDestination]:
         query = get_latest_user_text(state)
-        result = research(
-            query,
-            state["response_language"],
+        language = state["response_language"]
+
+        try:
+            result = research(query, language)
+
+            if not isinstance(result, ResearchResult):
+                raise InvalidModelOutputError("Research runner returned an unexpected result type")
+
+            result_record = result.to_record()
+        except Exception as exc:
+            return _create_runtime_error_command(exc, language)
+
+        return Command(
+            goto="finalize",
+            update={
+                "agent_result": result_record,
+                "error": None,
+            },
         )
+
+    return research_node
+
+
+def create_error_node() -> Callable[[AppState], NodeUpdate]:
+    """Convert safe runtime error metadata into a canonical agent result."""
+
+    def error_node(state: AppState) -> NodeUpdate:
+        error_record = state.get("error")
+
+        if error_record is None:
+            raise ValueError("Error node requires safe error metadata")
+
+        error = ErrorInfo.model_validate(error_record)
+        result = AgentResult(answer=error.message)
+
+        return {
+            "agent_result": result.to_record(),
+            "clarification_question": None,
+        }
+
+    return error_node
+
+
+def create_finalize_node() -> Callable[[AppState], NodeUpdate]:
+    """Append the already validated result without inventing new content."""
+
+    def finalize_node(state: AppState) -> NodeUpdate:
+        result_record = state.get("agent_result")
+
+        if result_record is None:
+            raise ValueError("Finalize node requires an agent result")
+
+        result = AgentResult.from_record(result_record)
 
         return {
             "messages": [
@@ -130,11 +203,10 @@ def create_research_node(
                     "role": "assistant",
                     "content": result.answer,
                 }
-            ],
-            "sources": [source.to_record() for source in result.sources],
+            ]
         }
 
-    return research_node
+    return finalize_node
 
 
 def create_clarification_node() -> Callable[[AppState], Command[Literal["router"]]]:
@@ -183,8 +255,39 @@ def create_clarification_node() -> Callable[[AppState], Command[Literal["router"
                     }
                 ],
                 "clarification_question": None,
-                "sources": [],
+                "agent_result": None,
+                "error": None,
             },
         )
 
     return clarification_node
+
+
+def _create_runtime_error_command(
+    error: Exception,
+    language: str,
+    *,
+    clear_routing: bool = False,
+) -> Command[Any]:
+    error_info = map_runtime_error(error, language)
+
+    if error_info is None:
+        raise error
+
+    update: NodeUpdate = {
+        "agent_result": None,
+        "error": error_info.to_record(),
+    }
+
+    if clear_routing:
+        update.update(
+            {
+                "route": None,
+                "routing_reason": None,
+                "routing_confidence": None,
+                "response_language": language,
+                "clarification_question": None,
+            }
+        )
+
+    return Command(goto="error", update=update)

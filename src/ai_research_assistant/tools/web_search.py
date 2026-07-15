@@ -10,6 +10,7 @@ from ai_research_assistant.models import SearchResultItem, SourceItem, SourceTyp
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 MAX_SOURCE_TITLE_LENGTH = 500
 MAX_SEARCH_CONTENT_LENGTH = 5000
+SEARCH_TOOL_ERROR_PREFIX = "SEARCH_ERROR:"
 PostCallable: TypeAlias = Callable[..., httpx.Response]
 
 
@@ -140,15 +141,80 @@ class TavilySearchService:
         return normalized
 
 
+class LazyTavilySearchService:
+    """Create the configured Tavily client only when search is first used."""
+
+    def __init__(
+        self,
+        factory: Callable[[], TavilySearchService] | None = None,
+    ) -> None:
+        self._factory = factory or create_tavily_search_service
+        self._service: TavilySearchService | None = None
+
+    def search(self, query: str, max_results: int = 5) -> list[SearchResultItem]:
+        """Delegate to one lazily created Tavily service instance."""
+
+        if self._service is None:
+            self._service = self._factory()
+
+        return self._service.search(query=query, max_results=max_results)
+
+
 def create_tavily_search_service() -> TavilySearchService:
     """Create the configured Tavily search service."""
 
     api_key = get_settings().web_search_api_key
 
-    if api_key is None:
+    if api_key is None or not api_key.get_secret_value().strip():
         raise SearchConfigurationError("WEB_SEARCH_API_KEY is not configured")
 
     return TavilySearchService(api_key=api_key)
+
+
+def create_lazy_tavily_search_service() -> LazyTavilySearchService:
+    """Create a search adapter that defers settings validation until first use."""
+
+    return LazyTavilySearchService()
+
+
+def format_search_service_error(error: SearchServiceError) -> str:
+    """Encode a safe provider-independent error category for a ToolMessage."""
+
+    if isinstance(error, SearchConfigurationError):
+        code = "configuration"
+    elif isinstance(error, SearchAuthenticationError):
+        code = "authentication"
+    elif isinstance(error, SearchRateLimitError):
+        code = "rate_limit"
+    elif isinstance(error, InvalidSearchResponseError):
+        code = "invalid_response"
+    else:
+        code = "unavailable"
+
+    return f"{SEARCH_TOOL_ERROR_PREFIX}{code}"
+
+
+def parse_search_service_error(message: str) -> SearchServiceError | None:
+    """Restore a typed search failure from a safe ToolMessage marker."""
+
+    error_types: dict[str, type[SearchServiceError]] = {
+        "configuration": SearchConfigurationError,
+        "authentication": SearchAuthenticationError,
+        "rate_limit": SearchRateLimitError,
+        "unavailable": SearchUnavailableError,
+        "invalid_response": InvalidSearchResponseError,
+    }
+
+    if not message.startswith(SEARCH_TOOL_ERROR_PREFIX):
+        return None
+
+    code = message.removeprefix(SEARCH_TOOL_ERROR_PREFIX)
+    error_type = error_types.get(code)
+
+    if error_type is None:
+        return None
+
+    return error_type(f"Web search failed with category: {code}")
 
 
 def _detect_source_type(url: HttpUrl) -> SourceType:

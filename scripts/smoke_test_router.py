@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from ai_research_assistant.graph import build_app_graph
+from ai_research_assistant.graph import CoreGraph, open_app_graph
 from ai_research_assistant.models import RouteName
 
 TEST_CASES: tuple[tuple[str, RouteName], ...] = (
@@ -32,7 +32,13 @@ def main() -> None:
     """Run live application graph checks with Ollama and Tavily."""
 
     print("Building the live application graph...")
-    graph = build_app_graph()
+
+    with open_app_graph() as graph:
+        run_application_checks(graph)
+
+
+def run_application_checks(graph: CoreGraph) -> None:
+    """Run all live route assertions against one managed graph."""
 
     for index, (query, expected_route) in enumerate(TEST_CASES, start=1):
         print(f"\nQuery: {query}")
@@ -55,7 +61,9 @@ def main() -> None:
 
         actual_route = result["route"]
         response = result["messages"][-1].content
-        sources = result.get("sources", [])
+        agent_result = result.get("agent_result") or {}
+        sources = agent_result.get("sources", [])
+        claims = agent_result.get("claims", [])
 
         print(f"Expected route: {expected_route}")
         print(f"Actual route:   {actual_route}")
@@ -76,6 +84,14 @@ def main() -> None:
 
             if not sources:
                 raise RuntimeError("Research route returned no verified sources")
+
+            if not claims:
+                raise RuntimeError("Research route returned no grounded claims")
+
+            source_ids = {source["source_id"] for source in sources}
+
+            if any(claim["source_id"] not in source_ids for claim in claims):
+                raise RuntimeError("Research route returned an unresolved claim source")
 
             if not any(
                 "langgraph" in f"{source['title']} {source['url']}".lower() for source in sources
@@ -103,8 +119,8 @@ def main() -> None:
                     "Research route returned a known grounding regression: "
                     + ", ".join(detected_bad_claims)
                 )
-        elif sources:
-            raise RuntimeError(f"Route {expected_route} returned unexpected sources")
+        elif sources or claims:
+            raise RuntimeError(f"Route {expected_route} returned unexpected evidence")
 
     print("\nAll live application graph smoke tests passed.")
 

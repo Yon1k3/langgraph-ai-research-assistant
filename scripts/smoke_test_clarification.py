@@ -2,14 +2,21 @@ from uuid import uuid4
 
 from langgraph.types import Command
 
-from ai_research_assistant.graph import build_app_graph
+from ai_research_assistant.graph import CoreGraph, open_app_graph
 
 
 def main() -> None:
     """Run one live clarification interrupt and resume through Ollama."""
 
     print("Building the checkpointed application graph...")
-    graph = build_app_graph()
+
+    with open_app_graph() as graph:
+        run_clarification_check(graph)
+
+
+def run_clarification_check(graph: CoreGraph) -> None:
+    """Run pause and resume assertions against one managed graph."""
+
     config = {
         "configurable": {
             "thread_id": f"clarification-smoke-{uuid4()}",

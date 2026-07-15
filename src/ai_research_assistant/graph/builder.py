@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, TypeAlias
 
 from langchain_core.runnables import RunnableLambda
@@ -12,6 +14,8 @@ from ai_research_assistant.graph.nodes import (
     ResponseGenerator,
     RouteClassifier,
     create_clarification_node,
+    create_error_node,
+    create_finalize_node,
     create_research_node,
     create_response_node,
     create_router_node,
@@ -22,7 +26,7 @@ from ai_research_assistant.graph.ollama import (
 )
 from ai_research_assistant.graph.state import AppState
 from ai_research_assistant.llm import create_chat_model
-from ai_research_assistant.memory import create_sqlite_checkpointer
+from ai_research_assistant.memory import open_sqlite_checkpointer
 
 CoreGraph: TypeAlias = CompiledStateGraph[
     AppState,
@@ -51,6 +55,8 @@ def build_core_graph(
     )
     research_node: RunnableLambda[AppState, Any] = RunnableLambda(create_research_node(research))
     clarification: RunnableLambda[AppState, Any] = RunnableLambda(create_clarification_node())
+    error: RunnableLambda[AppState, Any] = RunnableLambda(create_error_node())
+    finalize: RunnableLambda[AppState, Any] = RunnableLambda(create_finalize_node())
     route_unavailable: RunnableLambda[AppState, Any] = RunnableLambda(
         create_response_node("route_unavailable", generate)
     )
@@ -64,30 +70,46 @@ def build_core_graph(
             "research",
             "clarification",
             "route_unavailable",
+            "error",
         ),
     )
-    builder.add_node("direct_answer", direct_answer)
-    builder.add_node("unsupported", unsupported)
-    builder.add_node("research", research_node)
+    builder.add_node(
+        "direct_answer",
+        direct_answer,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node(
+        "unsupported",
+        unsupported,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node(
+        "research",
+        research_node,
+        destinations=("finalize", "error"),
+    )
     builder.add_node("clarification", clarification, destinations=("router",))
-    builder.add_node("route_unavailable", route_unavailable)
+    builder.add_node(
+        "route_unavailable",
+        route_unavailable,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node("error", error)
+    builder.add_node("finalize", finalize)
 
     builder.add_edge(START, "router")
 
-    builder.add_edge("direct_answer", END)
-    builder.add_edge("unsupported", END)
-    builder.add_edge("research", END)
-    builder.add_edge("route_unavailable", END)
+    builder.add_edge("error", "finalize")
+    builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer)
 
 
-def build_app_graph() -> CoreGraph:
-    """Build the application graph with configured live dependencies."""
+def build_app_graph(*, checkpointer: Checkpointer) -> CoreGraph:
+    """Build the live application graph with an explicitly owned checkpointer."""
 
     model = create_chat_model()
     research_agent = create_research_agent(model=model)
-    checkpointer = create_sqlite_checkpointer(get_settings().checkpoint_db_path)
 
     return build_core_graph(
         classify=create_ollama_route_classifier(model),
@@ -95,3 +117,11 @@ def build_app_graph() -> CoreGraph:
         research=research_agent.run,
         checkpointer=checkpointer,
     )
+
+
+@contextmanager
+def open_app_graph() -> Iterator[CoreGraph]:
+    """Open the live graph and close its SQLite checkpointer on exit."""
+
+    with open_sqlite_checkpointer(get_settings().checkpoint_db_path) as checkpointer:
+        yield build_app_graph(checkpointer=checkpointer)

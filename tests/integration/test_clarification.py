@@ -1,11 +1,22 @@
+import sqlite3
 from pathlib import Path
 
+import pytest
 from langgraph.types import Command
 
 from ai_research_assistant.graph.builder import build_core_graph
 from ai_research_assistant.graph.nodes import ResponseKind
-from ai_research_assistant.memory import create_sqlite_checkpointer
-from ai_research_assistant.models import ResearchResult, RouteDecision, SourceItem
+from ai_research_assistant.memory import (
+    create_sqlite_checkpointer,
+    open_sqlite_checkpointer,
+)
+from ai_research_assistant.models import (
+    AgentResult,
+    ResearchResult,
+    RouteDecision,
+    SourceItem,
+    SourceReference,
+)
 
 
 def test_checkpointer_preserves_messages_in_the_same_thread(tmp_path: Path) -> None:
@@ -35,6 +46,14 @@ def test_checkpointer_preserves_messages_in_the_same_thread(tmp_path: Path) -> N
     ]
 
     checkpointer.conn.close()
+
+
+def test_managed_checkpointer_closes_connection_on_exit(tmp_path: Path) -> None:
+    with open_sqlite_checkpointer(tmp_path / "managed.sqlite3") as checkpointer:
+        checkpointer.conn.execute("SELECT 1")
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        checkpointer.conn.execute("SELECT 1")
 
 
 def test_checkpointer_isolates_conversation_threads(tmp_path: Path) -> None:
@@ -78,13 +97,14 @@ def test_sqlite_checkpointer_serializes_research_sources(tmp_path: Path) -> None
         url="https://docs.langchain.com/oss/python/langgraph/overview",
         source_type="documentation",
     )
+    source_reference = SourceReference.from_source(source)
     checkpointer = create_sqlite_checkpointer(tmp_path / "research.sqlite3")
     graph = build_core_graph(
         classify=_classify_research,
         generate=_generate_response,
         research=lambda query, language: ResearchResult(
             answer=f"Research answer for {language}:{query}",
-            sources=[source],
+            sources=[source_reference],
         ),
         checkpointer=checkpointer,
     )
@@ -94,10 +114,15 @@ def test_sqlite_checkpointer_serializes_research_sources(tmp_path: Path) -> None
         config={"configurable": {"thread_id": "research-thread"}},
     )
 
-    assert result["sources"] == [source.to_record()]
-    assert graph.get_state({"configurable": {"thread_id": "research-thread"}}).values[
-        "sources"
-    ] == [source.to_record()]
+    expected_result = ResearchResult(
+        answer="Research answer for en:Research LangGraph",
+        sources=[source_reference],
+    ).to_record()
+    assert result["agent_result"] == expected_result
+    assert (
+        graph.get_state({"configurable": {"thread_id": "research-thread"}}).values["agent_result"]
+        == expected_result
+    )
 
     checkpointer.conn.close()
 
@@ -112,6 +137,18 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
         checkpointer=first_checkpointer,
     )
     config = {"configurable": {"thread_id": "clarification-thread"}}
+    stale_result = AgentResult(
+        answer="Stale answer",
+        sources=[
+            SourceReference.from_source(
+                SourceItem(
+                    title="Stale source",
+                    url="https://example.com/stale",
+                    source_type="web",
+                )
+            )
+        ],
+    )
 
     interrupted = first_graph.invoke(
         {
@@ -120,7 +157,8 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
                     "role": "user",
                     "content": "Help me with an agent.",
                 }
-            ]
+            ],
+            "agent_result": stale_result.to_record(),
         },
         config=config,
     )
@@ -130,6 +168,8 @@ def test_clarification_interrupt_resumes_with_persisted_state(tmp_path: Path) ->
         "type": "clarification",
         "question": "What kind of agent are you building?",
     }
+    assert interrupted["agent_result"] is None
+    assert first_graph.get_state(config).values["agent_result"] is None
 
     first_checkpointer.conn.close()
 
