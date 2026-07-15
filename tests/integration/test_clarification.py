@@ -1,10 +1,15 @@
+import sqlite3
 from pathlib import Path
 
+import pytest
 from langgraph.types import Command
 
 from ai_research_assistant.graph.builder import build_core_graph
 from ai_research_assistant.graph.nodes import ResponseKind
-from ai_research_assistant.memory import create_sqlite_checkpointer
+from ai_research_assistant.memory import (
+    create_sqlite_checkpointer,
+    open_sqlite_checkpointer,
+)
 from ai_research_assistant.models import (
     AgentResult,
     ResearchResult,
@@ -41,6 +46,14 @@ def test_checkpointer_preserves_messages_in_the_same_thread(tmp_path: Path) -> N
     ]
 
     checkpointer.conn.close()
+
+
+def test_managed_checkpointer_closes_connection_on_exit(tmp_path: Path) -> None:
+    with open_sqlite_checkpointer(tmp_path / "managed.sqlite3") as checkpointer:
+        checkpointer.conn.execute("SELECT 1")
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        checkpointer.conn.execute("SELECT 1")
 
 
 def test_checkpointer_isolates_conversation_threads(tmp_path: Path) -> None:

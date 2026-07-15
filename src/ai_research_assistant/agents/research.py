@@ -32,7 +32,11 @@ from ai_research_assistant.models import (
     SourceType,
     build_source_id,
 )
-from ai_research_assistant.tools import create_tavily_search_service
+from ai_research_assistant.tools import (
+    create_lazy_tavily_search_service,
+    format_search_service_error,
+    parse_search_service_error,
+)
 from ai_research_assistant.tools.web_search import SearchServiceError
 
 RESEARCH_SYSTEM_PROMPT = """
@@ -201,6 +205,11 @@ class _WebSearchInput(BaseModel):
 
 
 def _format_search_tool_error(error: ToolException) -> str:
+    cause = error.__cause__
+
+    if isinstance(cause, SearchServiceError):
+        return format_search_service_error(cause)
+
     return f"Web search failed: {error}"
 
 
@@ -362,7 +371,7 @@ def create_research_agent(
 ) -> ResearchAgent:
     """Create the Ollama-backed Research Agent."""
 
-    resolved_search_service = search_service or create_tavily_search_service()
+    resolved_search_service = search_service or create_lazy_tavily_search_service()
     resolved_model = model or create_chat_model()
     search_tool = create_web_search_tool(resolved_search_service)
     synthesize = create_grounded_synthesizer(resolved_model)
@@ -573,6 +582,11 @@ def _validate_initial_search_message(message: ToolMessage) -> None:
             detail = message.content
         else:
             detail = "Initial web search failed"
+
+        search_error = parse_search_service_error(detail)
+
+        if search_error is not None:
+            raise search_error
 
         raise ResearchSearchError(detail)
 

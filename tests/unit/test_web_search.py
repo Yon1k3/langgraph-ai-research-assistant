@@ -6,7 +6,9 @@ from pydantic import SecretStr
 
 from ai_research_assistant.tools.web_search import (
     InvalidSearchResponseError,
+    LazyTavilySearchService,
     SearchAuthenticationError,
+    SearchConfigurationError,
     SearchRateLimitError,
     TavilySearchService,
 )
@@ -140,3 +142,35 @@ def test_search_truncates_oversized_text_fields() -> None:
 
     assert len(results[0].source.title) == 500
     assert len(results[0].content) == 5000
+
+
+def test_lazy_search_creates_one_service_on_first_use() -> None:
+    factory_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": []}, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+
+        def factory() -> TavilySearchService:
+            nonlocal factory_calls
+            factory_calls += 1
+            return TavilySearchService(SecretStr("test-key"), post=client.post)
+
+        service = LazyTavilySearchService(factory)
+
+        assert factory_calls == 0
+        assert service.search("LangGraph") == []
+        assert service.search("LangChain") == []
+
+    assert factory_calls == 1
+
+
+def test_lazy_search_defers_configuration_error_until_first_use() -> None:
+    def unconfigured_factory() -> TavilySearchService:
+        raise SearchConfigurationError("WEB_SEARCH_API_KEY is not configured")
+
+    service = LazyTavilySearchService(unconfigured_factory)
+
+    with pytest.raises(SearchConfigurationError, match="WEB_SEARCH_API_KEY"):
+        service.search("LangGraph")

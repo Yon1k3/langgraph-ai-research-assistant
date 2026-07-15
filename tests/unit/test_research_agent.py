@@ -18,7 +18,10 @@ from ai_research_assistant.models import (
     SourceItem,
     build_source_id,
 )
-from ai_research_assistant.tools.web_search import SearchUnavailableError
+from ai_research_assistant.tools.web_search import (
+    SearchConfigurationError,
+    SearchUnavailableError,
+)
 
 
 class FakeSearchService:
@@ -293,10 +296,7 @@ def test_research_agent_stops_when_initial_search_fails() -> None:
         synthesize=synthesizer,
     )
 
-    with pytest.raises(
-        ResearchSearchError,
-        match="Search is unavailable",
-    ):
+    with pytest.raises(SearchUnavailableError):
         agent.run("Explain LangGraph")
 
     assert runner.last_input is None
@@ -334,7 +334,29 @@ def test_search_tool_converts_provider_error_to_tool_error() -> None:
 
     assert isinstance(message, ToolMessage)
     assert message.status == "error"
-    assert "Search is unavailable" in message.content
+    assert message.content == "SEARCH_ERROR:unavailable"
+
+
+def test_research_agent_preserves_missing_search_configuration_error() -> None:
+    class UnconfiguredSearchService:
+        def search(
+            self,
+            query: str,
+            max_results: int = 5,
+        ) -> list[SearchResultItem]:
+            raise SearchConfigurationError("WEB_SEARCH_API_KEY is not configured")
+
+    runner = FakeRunner()
+    agent = ResearchAgent(
+        runner=runner,
+        search_tool=create_web_search_tool(UnconfiguredSearchService()),
+        synthesize=FakeSynthesizer(),
+    )
+
+    with pytest.raises(SearchConfigurationError):
+        agent.run("Explain LangGraph")
+
+    assert runner.last_input is None
 
 
 def test_research_agent_returns_only_sources_selected_by_synthesis() -> None:

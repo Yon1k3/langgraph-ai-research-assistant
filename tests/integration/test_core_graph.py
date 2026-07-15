@@ -15,7 +15,10 @@ from ai_research_assistant.models import (
     SourceItem,
     SourceReference,
 )
-from ai_research_assistant.tools.web_search import SearchUnavailableError
+from ai_research_assistant.tools.web_search import (
+    SearchConfigurationError,
+    SearchUnavailableError,
+)
 
 
 def create_fake_classifier(route: RouteName) -> RouteClassifier:
@@ -204,6 +207,23 @@ def test_core_graph_returns_safe_error_when_research_search_is_unavailable() -> 
     assert result["error"]["category"] == "search_unavailable"
     assert "Private service detail" not in result["messages"][-1].content
     assert result["agent_result"]["sources"] == []
+
+
+def test_core_graph_explains_missing_search_configuration() -> None:
+    def unconfigured_research(query: str, language: str) -> ResearchResult:
+        raise SearchConfigurationError(f"Missing search key for {language}:{query}")
+
+    graph = build_core_graph(
+        classify=create_fake_classifier("research"),
+        generate=fake_response_generator,
+        research=unconfigured_research,
+    )
+
+    result = graph.invoke({"messages": [{"role": "user", "content": "Test request"}]})
+
+    assert result["error"]["category"] == "search_not_configured"
+    assert "WEB_SEARCH_API_KEY" in result["messages"][-1].content
+    assert "Missing search key" not in result["messages"][-1].content
 
 
 def test_core_graph_returns_safe_error_for_invalid_generated_response() -> None:

@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from ai_research_assistant.graph import build_app_graph
+from ai_research_assistant.graph import CoreGraph, open_app_graph
 from ai_research_assistant.models import RouteName
 
 TEST_CASES: tuple[tuple[str, RouteName], ...] = (
@@ -32,7 +32,13 @@ def main() -> None:
     """Run live application graph checks with Ollama and Tavily."""
 
     print("Building the live application graph...")
-    graph = build_app_graph()
+
+    with open_app_graph() as graph:
+        run_application_checks(graph)
+
+
+def run_application_checks(graph: CoreGraph) -> None:
+    """Run all live route assertions against one managed graph."""
 
     for index, (query, expected_route) in enumerate(TEST_CASES, start=1):
         print(f"\nQuery: {query}")
