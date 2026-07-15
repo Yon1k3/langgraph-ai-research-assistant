@@ -2,10 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from ai_research_assistant.models import (
+    AgentResult,
     GroundedClaim,
     ResearchSynthesis,
     RouteDecision,
     RouteName,
+    SourceItem,
+    SourceReference,
 )
 
 ALL_ROUTES: tuple[RouteName, ...] = (
@@ -125,4 +128,47 @@ def test_research_synthesis_rejects_invalid_evidence_contract(
         ResearchSynthesis(
             claims=claims,
             is_sufficient=is_sufficient,
+        )
+
+
+def test_agent_result_round_trips_through_checkpoint_safe_record() -> None:
+    source = SourceReference.from_source(
+        SourceItem(
+            title="LangGraph overview",
+            url="https://docs.langchain.com/oss/python/langgraph/overview",
+            source_type="documentation",
+        )
+    )
+    result = AgentResult(
+        answer="LangGraph supports stateful workflows.",
+        sources=[source],
+        claims=[
+            GroundedClaim(
+                statement="LangGraph supports stateful workflows.",
+                source_id=source.source_id,
+                supporting_quote="LangGraph supports durable stateful agent workflows.",
+            )
+        ],
+    )
+
+    restored = AgentResult.from_record(result.to_record())
+
+    assert restored == result
+    assert isinstance(result.to_record()["sources"][0]["url"], str)
+
+
+def test_agent_result_rejects_claim_with_unknown_source_id() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="every grounded claim must reference a result source",
+    ):
+        AgentResult(
+            answer="Unresolvable claim.",
+            claims=[
+                GroundedClaim(
+                    statement="Unresolvable claim.",
+                    source_id="src-0123456789ab",
+                    supporting_quote="This quote is long enough but has no source.",
+                )
+            ],
         )

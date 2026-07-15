@@ -1,5 +1,6 @@
 from langchain_ollama import ChatOllama
 
+from ai_research_assistant.errors import InvalidModelOutputError
 from ai_research_assistant.graph.nodes import (
     ResponseGenerator,
     ResponseKind,
@@ -124,7 +125,7 @@ def create_ollama_route_classifier(model: ChatOllama) -> RouteClassifier:
         )
 
         if not isinstance(result, RouteDecision):
-            raise TypeError("Router returned an unexpected response type")
+            raise InvalidModelOutputError("Router returned an unexpected response type")
 
         return result
 
@@ -153,12 +154,12 @@ def create_ollama_response_generator(model: ChatOllama) -> ResponseGenerator:
         )
 
         if not isinstance(response.content, str):
-            raise TypeError("Response node returned non-text content")
+            raise InvalidModelOutputError("Response node returned non-text content")
 
         content = response.content.strip()
 
         if not content:
-            raise ValueError("Response node returned empty content")
+            raise InvalidModelOutputError("Response node returned empty content")
 
         return content
 

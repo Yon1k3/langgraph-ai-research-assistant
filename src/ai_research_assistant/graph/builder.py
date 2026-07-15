@@ -12,6 +12,8 @@ from ai_research_assistant.graph.nodes import (
     ResponseGenerator,
     RouteClassifier,
     create_clarification_node,
+    create_error_node,
+    create_finalize_node,
     create_research_node,
     create_response_node,
     create_router_node,
@@ -51,6 +53,8 @@ def build_core_graph(
     )
     research_node: RunnableLambda[AppState, Any] = RunnableLambda(create_research_node(research))
     clarification: RunnableLambda[AppState, Any] = RunnableLambda(create_clarification_node())
+    error: RunnableLambda[AppState, Any] = RunnableLambda(create_error_node())
+    finalize: RunnableLambda[AppState, Any] = RunnableLambda(create_finalize_node())
     route_unavailable: RunnableLambda[AppState, Any] = RunnableLambda(
         create_response_node("route_unavailable", generate)
     )
@@ -64,20 +68,37 @@ def build_core_graph(
             "research",
             "clarification",
             "route_unavailable",
+            "error",
         ),
     )
-    builder.add_node("direct_answer", direct_answer)
-    builder.add_node("unsupported", unsupported)
-    builder.add_node("research", research_node)
+    builder.add_node(
+        "direct_answer",
+        direct_answer,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node(
+        "unsupported",
+        unsupported,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node(
+        "research",
+        research_node,
+        destinations=("finalize", "error"),
+    )
     builder.add_node("clarification", clarification, destinations=("router",))
-    builder.add_node("route_unavailable", route_unavailable)
+    builder.add_node(
+        "route_unavailable",
+        route_unavailable,
+        destinations=("finalize", "error"),
+    )
+    builder.add_node("error", error)
+    builder.add_node("finalize", finalize)
 
     builder.add_edge(START, "router")
 
-    builder.add_edge("direct_answer", END)
-    builder.add_edge("unsupported", END)
-    builder.add_edge("research", END)
-    builder.add_edge("route_unavailable", END)
+    builder.add_edge("error", "finalize")
+    builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer)
 

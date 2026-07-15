@@ -1,4 +1,3 @@
-import hashlib
 import json
 
 import pytest
@@ -17,6 +16,7 @@ from ai_research_assistant.models import (
     ResearchSynthesis,
     SearchResultItem,
     SourceItem,
+    build_source_id,
 )
 from ai_research_assistant.tools.web_search import SearchUnavailableError
 
@@ -133,10 +133,8 @@ def make_search_result(
 
 
 def make_evidence(source: SourceItem) -> EvidenceItem:
-    source_digest = hashlib.sha256(str(source.url).encode("utf-8")).hexdigest()[:12]
-
     return EvidenceItem(
-        source_id=f"src-{source_digest}",
+        source_id=build_source_id(str(source.url)),
         source=source,
         content="Additional search evidence.",
         score=0.9,
@@ -362,7 +360,8 @@ def test_research_agent_returns_only_sources_selected_by_synthesis() -> None:
     result = agent.run("Explain LangGraph", response_language="en")
 
     assert result.answer == "LangGraph supports stateful agent workflows."
-    assert result.sources == [repository]
+    assert [source.source for source in result.sources] == [repository]
+    assert result.claims[0].source_id == result.sources[0].source_id
     assert len(synthesizer.calls) == 1
 
     query, language, evidence = synthesizer.calls[0]
@@ -412,7 +411,7 @@ def test_research_agent_deduplicates_evidence_from_multiple_searches() -> None:
 
     result = agent.run("Explain LangGraph", response_language="en")
 
-    assert result.sources == [source]
+    assert [reference.source for reference in result.sources] == [source]
     assert len(synthesizer.calls[0][2]) == 1
 
 
@@ -538,7 +537,7 @@ def test_research_agent_filters_evidence_unrelated_to_subject() -> None:
 
     evidence = synthesizer.calls[0][2]
     assert [item.source for item in evidence] == [relevant_source]
-    assert result.sources == [relevant_source]
+    assert [source.source for source in result.sources] == [relevant_source]
 
 
 def test_research_agent_rejects_invalid_evidence_artifact() -> None:

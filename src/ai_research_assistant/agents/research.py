@@ -1,4 +1,3 @@
-import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -18,6 +17,10 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from ai_research_assistant.errors import (
+    InvalidResearchResultError,
+    ResearchSearchError,
+)
 from ai_research_assistant.llm import create_chat_model
 from ai_research_assistant.models import (
     EvidenceItem,
@@ -25,8 +28,9 @@ from ai_research_assistant.models import (
     ResearchResult,
     ResearchSynthesis,
     SearchResultItem,
-    SourceItem,
+    SourceReference,
     SourceType,
+    build_source_id,
 )
 from ai_research_assistant.tools import create_tavily_search_service
 from ai_research_assistant.tools.web_search import SearchServiceError
@@ -189,14 +193,6 @@ class AgentRunner(Protocol):
 EvidenceSynthesizer = Callable[[str, str, list[EvidenceItem]], ResearchSynthesis]
 
 
-class InvalidResearchResultError(RuntimeError):
-    """Raised when the research agent returns an invalid state."""
-
-
-class ResearchSearchError(RuntimeError):
-    """Raised when mandatory research search produces no usable sources."""
-
-
 class _WebSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     max_results: int = Field(default=5, ge=1, le=10)
@@ -299,6 +295,7 @@ class ResearchAgent:
         return ResearchResult(
             answer=answer,
             sources=sources,
+            claims=verified_claims,
         )
 
 
@@ -561,10 +558,9 @@ def _build_initial_search_query(query: str) -> str:
 
 def _create_evidence_item(item: SearchResultItem) -> EvidenceItem:
     source_url = str(item.source.url)
-    source_digest = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:12]
 
     return EvidenceItem(
-        source_id=f"src-{source_digest}",
+        source_id=build_source_id(source_url),
         source=item.source,
         content=item.content,
         score=item.score,
@@ -854,7 +850,7 @@ def _format_verified_claims(claims: list[GroundedClaim]) -> str:
 def _resolve_used_sources(
     used_source_ids: list[str],
     evidence: list[EvidenceItem],
-) -> list[SourceItem]:
+) -> list[SourceReference]:
     evidence_by_id = {item.source_id: item for item in evidence}
     unknown_source_ids = [
         source_id for source_id in used_source_ids if source_id not in evidence_by_id
@@ -866,7 +862,13 @@ def _resolve_used_sources(
             + ", ".join(unknown_source_ids)
         )
 
-    return [evidence_by_id[source_id].source for source_id in used_source_ids]
+    return [
+        SourceReference(
+            source_id=source_id,
+            source=evidence_by_id[source_id].source,
+        )
+        for source_id in used_source_ids
+    ]
 
 
 def _get_insufficient_evidence_response(response_language: str) -> str:
