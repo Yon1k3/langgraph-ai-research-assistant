@@ -7,7 +7,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
-from ai_research_assistant.agents import create_code_agent, create_research_agent
+from ai_research_assistant.agents import (
+    SpecialistAgent,
+    create_code_agent,
+    create_research_agent,
+)
 from ai_research_assistant.config import get_settings
 from ai_research_assistant.graph.nodes import (
     CodeRunner,
@@ -29,6 +33,7 @@ from ai_research_assistant.graph.ollama import (
 from ai_research_assistant.graph.state import AppState
 from ai_research_assistant.llm import create_chat_model
 from ai_research_assistant.memory import open_sqlite_checkpointer
+from ai_research_assistant.models import CodeResult, ResearchResult
 
 CoreGraph: TypeAlias = CompiledStateGraph[
     AppState,
@@ -119,8 +124,8 @@ def build_app_graph(*, checkpointer: Checkpointer) -> CoreGraph:
     """Build the live application graph with an explicitly owned checkpointer."""
 
     model = create_chat_model()
-    research_agent = create_research_agent(model=model)
-    code_agent = create_code_agent(model=model)
+    research_agent: SpecialistAgent[ResearchResult] = create_research_agent(model=model)
+    code_agent: SpecialistAgent[CodeResult] = create_code_agent(model=model)
 
     return build_core_graph(
         classify=create_ollama_route_classifier(model),
