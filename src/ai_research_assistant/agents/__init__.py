@@ -1,3 +1,4 @@
+from ai_research_assistant.agents.base import SpecialistAgent
 from ai_research_assistant.agents.code import (
     CodeAgent,
     create_code_agent,
@@ -22,6 +23,7 @@ __all__ = [
     "InvalidResearchResultError",
     "ResearchAgent",
     "ResearchSearchError",
+    "SpecialistAgent",
     "create_code_agent",
     "create_code_synthesizer",
     "create_research_agent",
